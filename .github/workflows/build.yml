@@ -29,7 +29,7 @@ jobs:
 
       - name: Check distribution
         run: |
-          uv pip install twine
+          uv pip install --system twine
           uv run twine check dist/*
 
       - name: Upload artifacts
@@ -61,7 +61,7 @@ jobs:
       - name: Install wheel
         shell: bash
         run: |
-          uv pip install dist/*.whl
+          uv pip install --system dist/*.whl
 
       - name: Test import
         run: uv run python -c "import pyphi; print('PyPhi imported successfully')"
