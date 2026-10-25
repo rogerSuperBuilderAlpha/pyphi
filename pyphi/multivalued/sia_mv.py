@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """IIT-4.0 system Φ for MultivaluedSubsystem (mirrors ``new_big_phi.sia``)."""
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ def sia(
             directions=directions,
         ),
         shortcircuit_func=utils.is_falsy,
-        desc="Evaluating partitions",
+        desc='Evaluating partitions',
         **parallel_kwargs,
     ).run()
 

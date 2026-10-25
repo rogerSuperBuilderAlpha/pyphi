@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Multivalued Subsystem — IIT-4.0 repertoires over mixed-radix SBS TPMs."""
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ class MultivaluedSubsystem(DistinctionMethods):
         cut=None,
     ):
         if not isinstance(network, MultivaluedNetwork):
-            raise TypeError("MultivaluedSubsystem requires MultivaluedNetwork")
+            raise TypeError('MultivaluedSubsystem requires MultivaluedNetwork')
         self.network = network
         self.node_labels = network.node_labels
         self.node_indices = self.node_labels.coerce_to_indices(nodes)
@@ -349,12 +350,12 @@ class MultivaluedSubsystem(DistinctionMethods):
         repertoire_distance = fallback(
             repertoire_distance, config.REPERTOIRE_DISTANCE
         )
-        if repertoire_distance == "GENERALIZED_INTRINSIC_DIFFERENCE":
-            if "state" not in kwargs:
+        if repertoire_distance == 'GENERALIZED_INTRINSIC_DIFFERENCE':
+            if 'state' not in kwargs:
                 raise ValueError(
-                    "must provide purview state for generalized intrinsic difference"
+                    'must provide purview state for generalized intrinsic difference'
                 )
-            purview_state = kwargs.pop("state")
+            purview_state = kwargs.pop('state')
             prs = [
                 self.forward_probability(
                     direction,
@@ -392,7 +393,7 @@ class MultivaluedSubsystem(DistinctionMethods):
                 )
             ) if purview else [()]
 
-        if repertoire_distance == "GENERALIZED_INTRINSIC_DIFFERENCE":
+        if repertoire_distance == 'GENERALIZED_INTRINSIC_DIFFERENCE':
             selectivity_repertoire = self.repertoire(
                 direction, mechanism, purview
             )
@@ -457,8 +458,8 @@ class MultivaluedSubsystem(DistinctionMethods):
         )
         if repertoire is None:
             repertoire = self.repertoire(direction, mechanism, purview)
-        if repertoire_distance == "GENERALIZED_INTRINSIC_DIFFERENCE":
-            purview_state = kwargs["state"].state
+        if repertoire_distance == 'GENERALIZED_INTRINSIC_DIFFERENCE':
+            purview_state = kwargs['state'].state
             selectivity = repertoire.squeeze()[purview_state] if purview else float(
                 repertoire.squeeze()
             )
@@ -486,7 +487,7 @@ class MultivaluedSubsystem(DistinctionMethods):
                 partitioned_repertoire=partitioned_pr,
                 mechanism_state=state_of(mechanism, self.state),
                 purview_state=state_of(purview, self.state),
-                specified_state=kwargs.get("state"),
+                specified_state=kwargs.get('state'),
                 node_labels=self.node_labels,
                 selectivity=selectivity,
             )

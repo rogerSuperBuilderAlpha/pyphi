@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Mixed-radix conditional independence on state-by-state TPMs.
 
 Never routes through binary state-by-node conversion or ``int(log2(...))``.
@@ -29,7 +30,7 @@ def decode_state(index: int, num_states_per_node: Sequence[int]) -> tuple[int, .
 def encode_state(state: Sequence[int], num_states_per_node: Sequence[int]) -> int:
     """Little-endian mixed-radix encode."""
     if len(state) != len(num_states_per_node):
-        raise ValueError("state length must match num_states_per_node")
+        raise ValueError('state length must match num_states_per_node')
     idx = 0
     place = 1
     for s, k in zip(state, num_states_per_node):

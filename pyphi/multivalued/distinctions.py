@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Mechanism irreducibility (distinctions) for mixed-radix subsystems.
 
 Mirrors the IIT 4.0 path of ``pyphi.subsystem.Subsystem`` (``find_mip``,
@@ -67,7 +68,7 @@ class DistinctionMethods:
             _evaluate_partition,
             partitions,
             shortcircuit_func=utils.is_falsy,
-            desc="Evaluating mechanism partitions",
+            desc='Evaluating mechanism partitions',
             **parallel_kwargs,
         ).run()
 
@@ -125,7 +126,7 @@ class DistinctionMethods:
                 partitions=partitions,
                 parallel_kwargs=parallel_kwargs,
             ),
-            desc="Finding MIP for maximum intrinsic information states",
+            desc='Finding MIP for maximum intrinsic information states',
             **parallel_kwargs,
         ).run()
 
@@ -179,7 +180,7 @@ class DistinctionMethods:
             _find_mip,
             purviews,
             total=len(purviews),
-            desc="Evaluating purviews",
+            desc='Evaluating purviews',
             **parallel_kwargs,
         )
         all_mice = map(mice_class, map_reduce.run())
@@ -191,7 +192,7 @@ class DistinctionMethods:
     def distinction(self, mechanism):
         """The concept specified by ``mechanism`` (cause and effect MICE)."""
         if not mechanism:
-            raise ValueError("distinction requires a non-empty mechanism")
+            raise ValueError('distinction requires a non-empty mechanism')
         cause = self.find_mice(Direction.CAUSE, mechanism)
         effect = self.find_mice(Direction.EFFECT, mechanism)
         return Concept(mechanism=mechanism, cause=cause, effect=effect)

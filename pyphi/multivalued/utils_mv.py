@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Mixed-radix state helpers (no binary log2 assumptions)."""
 
 from __future__ import annotations
