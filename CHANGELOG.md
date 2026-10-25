@@ -9,6 +9,10 @@ _Next version_
 
 - Added `pyphi.tpm.is_deterministic()`
 - Added `pyphi.tpm.simulate()`
+- Added opt-in `pyphi.multivalued` for IIT 4.0 on per-node alphabets
+  ``k_i >= 2`` (ternary and mixed radix). Binary `ExplicitTPM` / `Subsystem`
+  behavior is unchanged; binary networks match `new_big_phi` to machine
+  precision.
 
 
 ### API changes
