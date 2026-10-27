@@ -8,16 +8,21 @@ import pytest
 from pyphi import Network, Subsystem, convert, new_big_phi
 from pyphi.conf import config
 from pyphi.exceptions import ConditionallyDependentError
+from pyphi.direction import Direction
+from pyphi.exceptions import StateUnreachableError
 from pyphi.multivalued import (
     MultivaluedExplicitTPM,
     MultivaluedNetwork,
+    MultivaluedSubsystem,
     exact_phi,
     maximal_complex,
     phi_structure,
+    sia,
 )
 from pyphi.multivalued.conditional_independence import encode_state
 from pyphi.multivalued.utils_mv import all_states_mixed
 from pyphi.tpm import ExplicitTPM
+from pyphi.utils import all_states, powerset
 
 PHI_TOL = 1e-8
 
@@ -152,6 +157,43 @@ class TestStateSpacePreservation:
         with pytest.raises(ConditionallyDependentError):
             MultivaluedExplicitTPM(sbs, (2, 2))
 
+    def test_cm_must_be_square(self):
+        sbs = deterministic_sbs((3, 3), lambda state: (state[1], state[0]))
+        with pytest.raises(ValueError):
+            MultivaluedNetwork(sbs, (3, 3), cm=np.ones((2, 3)))
+        with pytest.raises(ValueError):
+            MultivaluedNetwork(sbs, (3, 3), cm=np.ones((3, 3)))
+
+    def test_network_equality_and_hash(self):
+        sbs = deterministic_sbs((3, 3), lambda state: (state[1], state[0]))
+        net_a = MultivaluedNetwork(sbs, (3, 3), node_labels=("A", "B"))
+        net_b = MultivaluedNetwork(sbs, (3, 3), node_labels=("A", "B"))
+        assert net_a == net_b
+        assert not (net_a != net_b)
+        assert hash(net_a) == hash(net_b)
+        assert len({net_a, net_b}) == 1
+
+        other_cm = MultivaluedNetwork(sbs, (3, 3), cm=np.eye(2))
+        assert net_a != other_cm
+
+        other_tpm = MultivaluedNetwork(
+            deterministic_sbs((3, 3), lambda state: state), (3, 3)
+        )
+        assert net_a != other_tpm
+
+        # Same matrix read with a different alphabet is a different network.
+        binary = deterministic_sbs((2, 2), lambda state: (state[1], state[0]))
+        stock = Network(convert.state_by_state2state_by_node(binary))
+        assert mv_network_from_sbn(stock.tpm.tpm, stock.cm, ("A", "B"))[0] != stock
+        assert stock != mv_network_from_sbn(stock.tpm.tpm, stock.cm, ("A", "B"))[0]
+
+    def test_all_states_mixed_is_little_endian(self):
+        assert list(all_states_mixed((2, 2))) == list(all_states(2))
+        assert list(all_states_mixed((2, 2, 2))) == list(all_states(3))
+        states = list(all_states_mixed((2, 3)))
+        assert states == [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2)]
+        assert [encode_state(s, (2, 3)) for s in states] == list(range(6))
+
 
 class TestBinaryParity:
     """M2: every binary network must match stock ``new_big_phi``."""
@@ -223,6 +265,102 @@ class TestBinaryParity:
         assert tuple(our_complex.node_indices) == (0, 1, 2)
 
 
+def random_sbn(rng, n, noisy):
+    """Random state-by-node TPM: deterministic (0/1) or noisy (uniform)."""
+    if noisy:
+        return rng.uniform(0.0, 1.0, size=(2**n, n))
+    return rng.integers(0, 2, size=(2**n, n)).astype(float)
+
+
+def cm_from_sbn(sbn):
+    """Connectivity matrix with an edge j -> i iff node i depends on node j."""
+    n = sbn.shape[-1]
+    md = convert.to_multidimensional(sbn)
+    cm = np.zeros((n, n), dtype=int)
+    for i in range(n):
+        for j in range(n):
+            off = np.take(md[..., i], 0, axis=j)
+            on = np.take(md[..., i], 1, axis=j)
+            if not np.allclose(off, on):
+                cm[j, i] = 1
+    return cm
+
+
+def complex_summary(result):
+    """(Φ, node indices) of a complex; NullPhiStructure has no indices."""
+    return float(result.phi), tuple(getattr(result, "node_indices", None) or ())
+
+
+def assert_binary_parity(seed, n, noisy, tol=1e-9):
+    """Radix-2 multivalued path must match stock pyphi on a random network.
+
+    For every network state and every non-empty subsystem, compares
+    reachability, system Φ, the major complex, and the cause and effect
+    repertoires over every (mechanism, purview) pair.
+    """
+    rng = np.random.default_rng(seed)
+    sbn = random_sbn(rng, n, noisy)
+    cm = cm_from_sbn(sbn)
+    labels = tuple("ABCD"[:n])
+    stock_network = Network(sbn, cm=cm, node_labels=labels)
+    network, _sbs = mv_network_from_sbn(sbn, cm, labels)
+
+    for state in all_states(n):
+        stock_complex = new_big_phi.maximal_complex(stock_network, state)
+        our_complex = maximal_complex(network, state)
+        stock_phi, stock_nodes = complex_summary(stock_complex)
+        our_phi, our_nodes = complex_summary(our_complex)
+        assert our_phi == pytest.approx(stock_phi, abs=tol), (seed, state)
+        assert our_nodes == stock_nodes, (seed, state)
+
+        for nodes in powerset(range(n), nonempty=True):
+            try:
+                stock_subsystem = Subsystem(stock_network, state, nodes)
+            except StateUnreachableError:
+                with pytest.raises(StateUnreachableError):
+                    MultivaluedSubsystem(network, state, nodes)
+                continue
+            subsystem = MultivaluedSubsystem(network, state, nodes)
+
+            stock_sia = new_big_phi.sia(stock_subsystem)
+            our_sia = sia(subsystem)
+            our_phi, stock_phi = float(our_sia.phi), float(stock_sia.phi)
+            assert our_phi == pytest.approx(stock_phi, abs=tol), (seed, state, nodes)
+
+            for mechanism in powerset(nodes, nonempty=True):
+                for purview in powerset(nodes, nonempty=True):
+                    for direction in Direction.both():
+                        expected = stock_subsystem.repertoire(
+                            direction, mechanism, purview
+                        )
+                        actual = subsystem.repertoire(direction, mechanism, purview)
+                        assert actual.shape == expected.shape
+                        assert np.allclose(actual, expected, atol=tol, rtol=0.0), (
+                            seed,
+                            state,
+                            nodes,
+                            mechanism,
+                            purview,
+                            direction,
+                        )
+
+
+class TestRandomBinaryParity:
+    """Seeded random binary networks, every state, every subsystem."""
+
+    @pytest.mark.parametrize(
+        "seed,noisy",
+        [(1, False), (2, False), (3, False), (4, True), (5, True), (6, True)],
+    )
+    def test_three_nodes(self, seed, noisy):
+        assert_binary_parity(seed, 3, noisy)
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("seed,noisy", [(7, False), (8, True)])
+    def test_four_nodes(self, seed, noisy):
+        assert_binary_parity(seed, 4, noisy)
+
+
 class TestTernaryAndMixedRadix:
     """Exact Φ_s, distinctions, relations, and complexes off radix 2."""
 
@@ -245,12 +383,19 @@ class TestTernaryAndMixedRadix:
         assert structure.relations.sum_phi() > 0.0
         assert math.isfinite(structure.big_phi)
 
-        # The major complex need not be the whole system. Here each mediated
-        # pair out-integrates the full triad; largest-first search keeps the
-        # first of those tied pairs, (W, S).
+        # The major complex need not be the whole system. The rule and the
+        # state are symmetric under W <-> C, so the pairs (W, S) and (S, C)
+        # tie, and each out-integrates the full triad. The search visits
+        # subsystems in stock order (``utils.powerset(..., reverse=True)``),
+        # so (S, C) is seen first and, as in stock ``maximal_complex``, the
+        # first subsystem at the maximum wins.
+        phi_ws = float(sia(MultivaluedSubsystem(network, state, (0, 1))).phi)
+        phi_sc = float(sia(MultivaluedSubsystem(network, state, (1, 2))).phi)
+        assert phi_ws == pytest.approx(phi_sc, abs=PHI_TOL)
+        assert phi_sc > phi
         complex_ = maximal_complex(network, state)
-        assert float(complex_.phi) > phi
-        assert tuple(complex_.node_indices) == (0, 1)
+        assert float(complex_.phi) == pytest.approx(phi_sc, abs=PHI_TOL)
+        assert tuple(complex_.node_indices) == (1, 2)
 
     def test_ternary_factored_system_has_zero_phi(self):
         sbs = deterministic_sbs((3, 3, 3), lambda state: state)
@@ -274,11 +419,9 @@ class TestTernaryAndMixedRadix:
         network = MultivaluedNetwork(
             sbs, radix, cm=TRIAD_CM, node_labels=("A", "B", "C")
         )
-        # (1, 1, 1): B' = 1+1 = 2, A' = C' = 1, so the state is reachable
-        # from itself only if B' == 1. Use the image (1, 2, 1), which
-        # (1, 1, 1) and (1, 2, 1) both... check a fixed point below.
+        # (1, 2, 1) is a fixed point: A' = C' = 1 because B > 0, and
+        # B' = A + C = 2. It is therefore reachable (from itself).
         state = (1, 2, 1)
-        # A' = 1 because B>0, B' = 1+1 = 2, C' = 1. Fixed point, reachable.
         phi = exact_phi(network, state)
         assert math.isfinite(phi)
         assert phi > 0.0
