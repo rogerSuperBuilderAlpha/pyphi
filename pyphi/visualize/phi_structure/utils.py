@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # visualize/phi_structure/utils.py
 """Common utilities for plotting |big_phi|-structures."""
 

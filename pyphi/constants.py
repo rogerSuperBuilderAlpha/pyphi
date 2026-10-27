@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # constants.py
 """Package-wide constants."""
 
@@ -9,7 +8,7 @@ from typing import Tuple
 #: The protocol used for pickling objects.
 PICKLE_PROTOCOL: int = pickle.HIGHEST_PROTOCOL
 
-DISK_CACHE_LOCATION: Path = Path('__pyphi_cache__')
+DISK_CACHE_LOCATION: Path = Path("__pyphi_cache__")
 
 #: Node states
 OFF: Tuple[int, ...] = (0,)

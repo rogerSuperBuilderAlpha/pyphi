@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # compute/network.py
 """Functions for computing network-level properties."""
 
@@ -93,7 +92,7 @@ def all_complexes(network, state, parallel_kwargs=None, **kwargs):
         possible_complexes(network, state, **kwargs),
         total=2 ** len(network) - 1,
         map_kwargs=dict(progress=False),
-        desc='Evaluating complexes',
+        desc="Evaluating complexes",
         **parallel_kwargs,
     ).run()
 
@@ -123,7 +122,7 @@ def major_complex(network, state, **kwargs):
         SystemIrreducibilityAnalysis: The |SIA| for the |Subsystem| with
         maximal |big_phi|.
     """
-    log.info('Calculating major complex...')
+    log.info("Calculating major complex...")
     empty_subsystem = Subsystem(network, state, ())
     default = _null_sia(empty_subsystem)
     parallel_kwargs = conf.parallel_kwargs(config.PARALLEL_COMPLEX_EVALUATION, **kwargs)
@@ -134,10 +133,10 @@ def major_complex(network, state, **kwargs):
         reduce_func=max,
         reduce_kwargs=dict(default=default),
         total=2 ** len(network) - 1,
-        desc='Evaluating complexes',
+        desc="Evaluating complexes",
         **parallel_kwargs,
     ).run()
-    log.info('Finished calculating major complex.')
+    log.info("Finished calculating major complex.")
     return result
 
 

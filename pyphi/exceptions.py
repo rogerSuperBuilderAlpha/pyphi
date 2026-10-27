@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # exceptions.py
 """PyPhi exceptions."""
 
@@ -8,7 +7,7 @@ from typing import Tuple
 class MissingOptionalDependenciesError(ModuleNotFoundError):
     """The user needs to install extra dependencies."""
 
-    MSG: str = 'Please re-install PyPhi with `pyphi[{dependencies}]` to use this feature.'
+    MSG: str = "Please re-install PyPhi with `pyphi[{dependencies}]` to use this feature."
 
 
 class StateUnreachableError(ValueError):
@@ -16,7 +15,7 @@ class StateUnreachableError(ValueError):
 
     def __init__(self, state: Tuple[int, ...]) -> None:
         self.state = state
-        msg = 'The state {} cannot be reached in the given TPM.'
+        msg = "The state {} cannot be reached in the given TPM."
         super().__init__(msg.format(state))
 
 

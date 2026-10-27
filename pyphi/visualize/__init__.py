@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # visualize/__init__.py
 """Provides visualization capabilities for PyPhi objects."""
 
@@ -10,7 +9,7 @@ try:
     import seaborn
 except ImportError as exc:
     raise MissingOptionalDependenciesError(
-        MissingOptionalDependenciesError.MSG.format(dependencies='visualize')
+        MissingOptionalDependenciesError.MSG.format(dependencies="visualize")
     ) from exc
 
 from .distribution import plot_distribution, plot_repertoires

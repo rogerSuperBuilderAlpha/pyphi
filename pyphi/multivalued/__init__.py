@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Opt-in multivalued (mixed-radix) IIT 4.0.
 
 Stock ``ExplicitTPM`` / ``Subsystem`` index states as binary: a square
@@ -10,7 +9,17 @@ cause/effect repertoires, intrinsic information (GID), system ``Φ_s``,
 distinctions, relations, and major complexes on that alphabet.
 
 Binary networks (``k_i = 2`` for every node) match ``pyphi.new_big_phi`` on
-the IIT 4.0 feature line.
+the IIT 4.0 feature line. The radix-2 path performs the same floating-point
+operations in the same order as stock ``Subsystem``/``Node``, and breaks ties
+the same way (exact equality for specified states, ``config.PRECISION`` for
+partitions and complexes), so results are bit-identical whenever the
+state-by-state TPM encodes the node marginals exactly (deterministic TPMs,
+or probabilities that are dyadic rationals). Otherwise the state-by-node ->
+state-by-state -> marginal round trip perturbs probabilities at the ulp
+level; Φ then agrees to about 1e-9 absolute, and a tie that is exact in real
+arithmetic (a symmetric network) or a near-deterministic probability
+(within ~1e-6 of 0 or 1) can resolve to a different state or partition than
+stock, with the consequences that entails.
 
 Example::
 
@@ -30,14 +39,14 @@ from .subsystem_mv import MultivaluedSubsystem
 from .tpm import MultivaluedExplicitTPM, MultivaluedTPMError, SBSNativeExplicitTPM
 
 __all__ = [
-    'MultivaluedNetwork',
-    'MultivaluedExplicitTPM',
-    'SBSNativeExplicitTPM',
-    'MultivaluedTPMError',
-    'MultivaluedSubsystem',
-    'exact_phi',
-    'sia',
-    'phi_structure',
-    'maximal_complex',
-    'probe_exact_phi_blocker',
+    "MultivaluedNetwork",
+    "MultivaluedExplicitTPM",
+    "SBSNativeExplicitTPM",
+    "MultivaluedTPMError",
+    "MultivaluedSubsystem",
+    "exact_phi",
+    "sia",
+    "phi_structure",
+    "maximal_complex",
+    "probe_exact_phi_blocker",
 ]

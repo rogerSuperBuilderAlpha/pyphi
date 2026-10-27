@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # relations.py
 """Implements the formalism for computing relations."""
 
@@ -26,7 +25,7 @@ class RelationFace(frozenset):
     def __new__(cls, *args, phi=None):
         self = super().__new__(cls, *args)
         if phi is None:
-            raise ValueError('phi keyword argument is required')
+            raise ValueError("phi keyword argument is required")
         self.phi = phi
         return self
 
@@ -81,24 +80,24 @@ class RelationFace(frozenset):
 
     def _repr_columns(self):
         return [
-            ('Purview', str(sorted(self.purview))),
-            ('Relata', len(self)),
+            ("Purview", str(sorted(self.purview))),
+            ("Relata", len(self)),
         ]
 
     def __repr__(self):
         # TODO(4.0) refactor into fmt function
-        body = '\n'.join(fmt.align_columns(self._repr_columns()))
+        body = "\n".join(fmt.align_columns(self._repr_columns()))
         body = fmt.center(body)
-        body += '\n' + fmt.indent(fmt.fmt_relata(self), amount=10)
+        body += "\n" + fmt.indent(fmt.fmt_relata(self), amount=10)
         body = fmt.header(self.__class__.__name__, body, under_char=fmt.HEADER_BAR_2)
         return fmt.box(body)
 
     def to_json(self):
-        return {'relata': list(self)}
+        return {"relata": list(self)}
 
     @classmethod
     def from_json(cls, data):
-        return cls(data['relata'])
+        return cls(data["relata"])
 
 
 class Relation(frozenset, cmp.OrderableByPhi):
@@ -165,14 +164,14 @@ class Relation(frozenset, cmp.OrderableByPhi):
 
     def _repr_columns(self):
         return [
-            (fmt.SMALL_PHI + '_r', self.phi),
-            ('Purview', str(sorted(self.purview))),
-            ('#(faces)', self.num_faces),
+            (fmt.SMALL_PHI + "_r", self.phi),
+            ("Purview", str(sorted(self.purview))),
+            ("#(faces)", self.num_faces),
         ]
 
     def __repr__(self):
         # TODO(4.0) refactor into fmt function
-        body = '\n'.join(fmt.align_columns(self._repr_columns()))
+        body = "\n".join(fmt.align_columns(self._repr_columns()))
         body = fmt.center(body)
         body = fmt.header(self.__class__.__name__, body, under_char=fmt.HEADER_BAR_2)
         return fmt.box(body)
@@ -183,7 +182,7 @@ class Relation(frozenset, cmp.OrderableByPhi):
 
     @classmethod
     def from_json(cls, data):
-        return cls(data['distinctions'])
+        return cls(data["distinctions"])
 
 
 def all_relations(distinctions, min_degree=2, max_degree=None, **kwargs):
@@ -205,7 +204,7 @@ def all_relations(distinctions, min_degree=2, max_degree=None, **kwargs):
     yield from MapReduce(
         worker,
         combinations,
-        desc='Evaluating relations',
+        desc="Evaluating relations",
         **parallel_kwargs,
     ).run()
 
@@ -256,7 +255,7 @@ class Relations:
     def _repr_columns(self):
         return [
             (f"Σ{fmt.SMALL_PHI}_r", self.sum_phi()),
-            ('#(relations)', self.num_relations()),
+            ("#(relations)", self.num_relations()),
         ]
 
     def to_json(self):
@@ -265,7 +264,7 @@ class Relations:
 
     @classmethod
     def from_json(cls, data):
-        return cls(data['relations'])
+        return cls(data["relations"])
 
 
 class ConcreteRelations(frozenset, Relations):
@@ -276,7 +275,7 @@ class ConcreteRelations(frozenset, Relations):
         return len(self)
 
     def __repr__(self):
-        body = '\n'.join(
+        body = "\n".join(
             fmt.align_columns(self._repr_columns()) + [fmt.margin(r) for r in self]
         )
         return fmt.header(
@@ -289,7 +288,7 @@ class ConcreteRelations(frozenset, Relations):
         faces = defaultdict(list)
         for relation in tqdm(
             self,
-            desc='Grouping relation faces by degree',
+            desc="Grouping relation faces by degree",
             leave=False,
         ):
             for face in relation.faces:
@@ -341,15 +340,15 @@ class AnalyticalRelations(Relations):
         return self.num_relations()
 
     def __repr__(self):
-        body = '\n'.join(fmt.align_columns(self._repr_columns()))
-        return fmt.box(fmt.header('AnalyticalRelations', body, '', fmt.HEADER_BAR_2))
+        body = "\n".join(fmt.align_columns(self._repr_columns()))
+        return fmt.box(fmt.header("AnalyticalRelations", body, "", fmt.HEADER_BAR_2))
 
 
 _CONGRUENCE_WARNING_MSG = (
-    'distinctions.resolve_congruence() has not been called; results may '
-    'include relations that do not exist after filtering out distinctions '
-    'incongruent with the SIA specified state. Consider using '
-    '`new_big_phi.phi_structure()` to obtain a consistent structure.'
+    "distinctions.resolve_congruence() has not been called; results may "
+    "include relations that do not exist after filtering out distinctions "
+    "incongruent with the SIA specified state. Consider using "
+    "`new_big_phi.phi_structure()` to obtain a consistent structure."
 )
 
 
@@ -375,18 +374,18 @@ class RelationComputationsRegistry(Registry):
     And use them by setting ``config.RELATION_COMPUTATIONS = 'NONE'``
     """
 
-    desc = 'methods for computing relations'
+    desc = "methods for computing relations"
 
 
 relation_computations = RelationComputationsRegistry()
 
 
-@relation_computations.register('CONCRETE')
+@relation_computations.register("CONCRETE")
 def concrete_relations(distinctions, **kwargs):
     return ConcreteRelations(all_relations(distinctions, **kwargs))
 
 
-@relation_computations.register('ANALYTICAL')
+@relation_computations.register("ANALYTICAL")
 def analytical_relations(distinctions, **kwargs):
     return AnalyticalRelations(distinctions)
 

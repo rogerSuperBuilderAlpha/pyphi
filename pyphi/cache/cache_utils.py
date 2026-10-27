@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # cache/cache_utils.py
 """Common utilities for caching."""
 
@@ -9,7 +8,7 @@ import psutil
 
 from ..conf import config
 
-_CacheInfo = namedtuple('CacheInfo', ['hits', 'misses', 'currsize'])
+_CacheInfo = namedtuple("CacheInfo", ["hits", "misses", "currsize"])
 
 
 def memory_full():
@@ -24,7 +23,7 @@ class _HashedSeq(list):
     key multiple times on a cache miss.
     """
 
-    __slots__ = ('hashvalue',)
+    __slots__ = ("hashvalue",)
 
     def __init__(self, tup, hash=hash):
         super().__init__()

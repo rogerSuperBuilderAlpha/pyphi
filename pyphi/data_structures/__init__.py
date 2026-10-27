@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # data_structures/__init__.py
 """Provides implementations of various data structures."""
 

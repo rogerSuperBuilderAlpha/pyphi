@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import numpy as np
 from hypothesis import given
 
@@ -126,5 +125,5 @@ def test_np_hashable():
 
 @given(iterable_or_list(anything()))
 def test_try_len(iterable):
-    expected = len(iterable) if hasattr(iterable, '__len__') else None
+    expected = len(iterable) if hasattr(iterable, "__len__") else None
     assert utils.try_len(iterable) == expected

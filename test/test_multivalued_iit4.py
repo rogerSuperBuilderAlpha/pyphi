@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Opt-in multivalued IIT 4.0: state space, binary parity, and Φ-structure."""
 
 import math
@@ -6,19 +5,24 @@ import math
 import numpy as np
 import pytest
 
-from pyphi import Network, Subsystem, convert, new_big_phi
+from pyphi import Network, Subsystem, compute, convert, new_big_phi
 from pyphi.conf import config
 from pyphi.exceptions import ConditionallyDependentError
+from pyphi.direction import Direction
+from pyphi.exceptions import StateUnreachableError
 from pyphi.multivalued import (
     MultivaluedExplicitTPM,
     MultivaluedNetwork,
+    MultivaluedSubsystem,
     exact_phi,
     maximal_complex,
     phi_structure,
+    sia,
 )
 from pyphi.multivalued.conditional_independence import encode_state
 from pyphi.multivalued.utils_mv import all_states_mixed
 from pyphi.tpm import ExplicitTPM
+from pyphi.utils import all_states, powerset
 
 PHI_TOL = 1e-8
 
@@ -99,7 +103,7 @@ class TestStateSpacePreservation:
     def test_ternary_sbs_preserved_and_stock_collapses(self):
         sbs = deterministic_sbs((3, 3), lambda state: (state[1], state[0]))
         with pytest.raises(Exception):
-            Network(sbs, node_labels=('A', 'B'))
+            Network(sbs, node_labels=("A", "B"))
 
         collapsed = ExplicitTPM(sbs, validate=False)
         assert collapsed.is_state_by_state()
@@ -109,7 +113,7 @@ class TestStateSpacePreservation:
         assert collapsed.number_of_units != 2
 
         native = MultivaluedExplicitTPM(sbs, (3, 3))
-        network = MultivaluedNetwork(native, (3, 3), node_labels=('A', 'B'))
+        network = MultivaluedNetwork(native, (3, 3), node_labels=("A", "B"))
         assert native.num_states_per_node == (3, 3)
         assert native.num_states == 9
         assert native.shape == (9, 9)
@@ -119,7 +123,7 @@ class TestStateSpacePreservation:
         assert np.allclose(network.sbs(), sbs)
 
         triad = deterministic_sbs((3, 3, 3), ternary_triad_next)
-        triad_net = MultivaluedNetwork(triad, (3, 3, 3), node_labels=('W', 'S', 'C'))
+        triad_net = MultivaluedNetwork(triad, (3, 3, 3), node_labels=("W", "S", "C"))
         assert triad_net.tpm.shape == (27, 27)
         assert triad_net.num_states == 27
         assert np.allclose(triad_net.sbs(), triad)
@@ -129,7 +133,7 @@ class TestStateSpacePreservation:
         sbs = deterministic_sbs(radix, lambda state: (state[0], state[1], state[2]))
         assert sbs.shape == (24, 24)
         network = MultivaluedNetwork(
-            sbs, radix, cm=np.eye(3), node_labels=('A', 'B', 'C')
+            sbs, radix, cm=np.eye(3), node_labels=("A", "B", "C")
         )
         assert network.num_states_per_node == radix
         assert network.num_states == 24
@@ -153,6 +157,43 @@ class TestStateSpacePreservation:
         with pytest.raises(ConditionallyDependentError):
             MultivaluedExplicitTPM(sbs, (2, 2))
 
+    def test_cm_must_be_square(self):
+        sbs = deterministic_sbs((3, 3), lambda state: (state[1], state[0]))
+        with pytest.raises(ValueError):
+            MultivaluedNetwork(sbs, (3, 3), cm=np.ones((2, 3)))
+        with pytest.raises(ValueError):
+            MultivaluedNetwork(sbs, (3, 3), cm=np.ones((3, 3)))
+
+    def test_network_equality_and_hash(self):
+        sbs = deterministic_sbs((3, 3), lambda state: (state[1], state[0]))
+        net_a = MultivaluedNetwork(sbs, (3, 3), node_labels=("A", "B"))
+        net_b = MultivaluedNetwork(sbs, (3, 3), node_labels=("A", "B"))
+        assert net_a == net_b
+        assert not (net_a != net_b)
+        assert hash(net_a) == hash(net_b)
+        assert len({net_a, net_b}) == 1
+
+        other_cm = MultivaluedNetwork(sbs, (3, 3), cm=np.eye(2))
+        assert net_a != other_cm
+
+        other_tpm = MultivaluedNetwork(
+            deterministic_sbs((3, 3), lambda state: state), (3, 3)
+        )
+        assert net_a != other_tpm
+
+        # Same matrix read with a different alphabet is a different network.
+        binary = deterministic_sbs((2, 2), lambda state: (state[1], state[0]))
+        stock = Network(convert.state_by_state2state_by_node(binary))
+        assert mv_network_from_sbn(stock.tpm.tpm, stock.cm, ("A", "B"))[0] != stock
+        assert stock != mv_network_from_sbn(stock.tpm.tpm, stock.cm, ("A", "B"))[0]
+
+    def test_all_states_mixed_is_little_endian(self):
+        assert list(all_states_mixed((2, 2))) == list(all_states(2))
+        assert list(all_states_mixed((2, 2, 2))) == list(all_states(3))
+        states = list(all_states_mixed((2, 3)))
+        assert states == [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2)]
+        assert [encode_state(s, (2, 3)) for s in states] == list(range(6))
+
 
 class TestBinaryParity:
     """M2: every binary network must match stock ``new_big_phi``."""
@@ -161,7 +202,7 @@ class TestBinaryParity:
         rules = binary_triad_rules()
         sbn = binary_sbn(rules)
         state = (1, 1, 1)
-        labels = ('W', 'S', 'C')
+        labels = ("W", "S", "C")
         stock = stock_phi(sbn, TRIAD_CM, state, labels)
         network, _sbs = mv_network_from_sbn(sbn, TRIAD_CM, labels)
         ours = exact_phi(network, state)
@@ -176,7 +217,7 @@ class TestBinaryParity:
         )
         cm = np.zeros((3, 3))
         state = (1, 0, 0)
-        labels = ('A', 'B', 'C')
+        labels = ("A", "B", "C")
         stock = stock_phi(sbn, cm, state, labels)
         network, _sbs = mv_network_from_sbn(sbn, cm, labels)
         assert float(stock.phi) == pytest.approx(0.0, abs=PHI_TOL)
@@ -185,14 +226,14 @@ class TestBinaryParity:
         # Two independent copy nodes, binary and then the same rule at k=2
         # inside the multivalued types.
         sbs = deterministic_sbs((2, 2), lambda state: state)
-        indep = MultivaluedNetwork(sbs, (2, 2), cm=np.eye(2), node_labels=('A', 'B'))
+        indep = MultivaluedNetwork(sbs, (2, 2), cm=np.eye(2), node_labels=("A", "B"))
         assert exact_phi(indep, (1, 0)) == pytest.approx(0.0, abs=PHI_TOL)
 
     def test_phi_structure_matches_stock(self):
         rules = binary_triad_rules()
         sbn = binary_sbn(rules)
         state = (1, 1, 1)
-        labels = ('W', 'S', 'C')
+        labels = ("W", "S", "C")
         stock_network = Network(sbn, cm=TRIAD_CM, node_labels=labels)
         stock_structure = new_big_phi.phi_structure(Subsystem(stock_network, state))
         network, _sbs = mv_network_from_sbn(sbn, TRIAD_CM, labels)
@@ -224,6 +265,273 @@ class TestBinaryParity:
         assert tuple(our_complex.node_indices) == (0, 1, 2)
 
 
+def random_sbn(rng, n, noisy):
+    """Random state-by-node TPM: deterministic (0/1) or noisy (uniform)."""
+    if noisy:
+        return rng.uniform(0.0, 1.0, size=(2**n, n))
+    return rng.integers(0, 2, size=(2**n, n)).astype(float)
+
+
+def cm_from_sbn(sbn):
+    """Connectivity matrix with an edge j -> i iff node i depends on node j."""
+    n = sbn.shape[-1]
+    md = convert.to_multidimensional(sbn)
+    cm = np.zeros((n, n), dtype=int)
+    for i in range(n):
+        for j in range(n):
+            off = np.take(md[..., i], 0, axis=j)
+            on = np.take(md[..., i], 1, axis=j)
+            if not np.allclose(off, on):
+                cm[j, i] = 1
+    return cm
+
+
+def complex_summary(result):
+    """(Φ, node indices) of a complex; NullPhiStructure has no indices."""
+    return float(result.phi), tuple(getattr(result, "node_indices", None) or ())
+
+
+def assert_same_sia(stock_sia, our_sia, where, tol):
+    """Same Φ, same specified system states, same MIP partition."""
+    assert float(our_sia.phi) == pytest.approx(float(stock_sia.phi), abs=tol), where
+    assert bool(our_sia) == bool(stock_sia), where
+    if stock_sia.system_state is None:
+        assert our_sia.system_state is None, where
+    else:
+        for direction in Direction.both():
+            expected = stock_sia.system_state[direction]
+            actual = our_sia.system_state[direction]
+            assert tuple(actual.state) == tuple(expected.state), (where, direction)
+            assert float(actual.intrinsic_information) == pytest.approx(
+                float(expected.intrinsic_information), abs=tol
+            ), (where, direction)
+    assert our_sia.partition == stock_sia.partition, where
+
+
+def assert_same_distinctions(stock_subsystem, stock_sia, subsystem, our_sia, where, tol):
+    """Same number of congruent distinctions and the same summed φ."""
+    expected = compute.ces(stock_subsystem)
+    actual = subsystem.all_distinctions()
+    if stock_sia.system_state is not None:
+        expected = expected.resolve_congruence(stock_sia.system_state)
+        actual = actual.resolve_congruence(our_sia.system_state)
+    assert len(actual) == len(expected), where
+    assert sorted(c.mechanism for c in actual) == sorted(
+        c.mechanism for c in expected
+    ), where
+    assert actual.sum_phi() == pytest.approx(expected.sum_phi(), abs=tol), where
+
+
+def assert_binary_parity_networks(stock_network, network, n, tag, tol=1e-9):
+    """Radix-2 multivalued path must match stock pyphi on one network.
+
+    For every network state and every non-empty subsystem, compares
+    reachability, the system irreducibility analysis (Φ, specified
+    cause/effect states, MIP partition), the congruent distinctions, the
+    major complex, and the cause and effect repertoires over every
+    (mechanism, purview) pair.
+    """
+    for state in all_states(n):
+        stock_complex = new_big_phi.maximal_complex(stock_network, state)
+        our_complex = maximal_complex(network, state)
+        stock_phi, stock_nodes = complex_summary(stock_complex)
+        our_phi, our_nodes = complex_summary(our_complex)
+        assert our_phi == pytest.approx(stock_phi, abs=tol), (tag, state)
+        assert our_nodes == stock_nodes, (tag, state)
+
+        for nodes in powerset(range(n), nonempty=True):
+            try:
+                stock_subsystem = Subsystem(stock_network, state, nodes)
+            except StateUnreachableError:
+                with pytest.raises(StateUnreachableError):
+                    MultivaluedSubsystem(network, state, nodes)
+                continue
+            subsystem = MultivaluedSubsystem(network, state, nodes)
+
+            stock_sia = new_big_phi.sia(stock_subsystem)
+            our_sia = sia(subsystem)
+            where = (tag, state, nodes)
+            assert_same_sia(stock_sia, our_sia, where, tol)
+            # Distinctions for every subsystem of small networks; for larger
+            # ones only the Φ-structure of the whole system (cost).
+            if n <= 3 or len(nodes) == n:
+                assert_same_distinctions(
+                    stock_subsystem, stock_sia, subsystem, our_sia, where, tol
+                )
+
+            for mechanism in powerset(nodes, nonempty=True):
+                for purview in powerset(nodes, nonempty=True):
+                    for direction in Direction.both():
+                        expected = stock_subsystem.repertoire(
+                            direction, mechanism, purview
+                        )
+                        actual = subsystem.repertoire(direction, mechanism, purview)
+                        assert actual.shape == expected.shape
+                        assert np.allclose(actual, expected, atol=tol, rtol=0.0), (
+                            tag,
+                            state,
+                            nodes,
+                            mechanism,
+                            purview,
+                            direction,
+                        )
+
+
+def assert_binary_parity(seed, n, noisy, tol=1e-9):
+    """Parity on a seeded random binary network (cm derived from the TPM)."""
+    rng = np.random.default_rng(seed)
+    sbn = random_sbn(rng, n, noisy)
+    cm = cm_from_sbn(sbn)
+    labels = tuple("ABCD"[:n])
+    stock_network = Network(sbn, cm=cm, node_labels=labels)
+    network, _sbs = mv_network_from_sbn(sbn, cm, labels)
+    assert_binary_parity_networks(stock_network, network, n, ("seed", seed), tol)
+
+
+class TestRandomBinaryParity:
+    """Seeded random binary networks, every state, every subsystem."""
+
+    @pytest.mark.parametrize(
+        "seed,noisy",
+        [(1, False), (2, False), (3, False), (4, True), (5, True), (6, True)],
+    )
+    def test_three_nodes(self, seed, noisy):
+        assert_binary_parity(seed, 3, noisy)
+
+    @pytest.mark.slow
+    @pytest.mark.parametrize("seed,noisy", [(7, False), (8, True)])
+    def test_four_nodes(self, seed, noisy):
+        assert_binary_parity(seed, 4, noisy)
+
+
+EPS = 1e-6
+
+# Near-deterministic 3-node networks from the PR #2 review. R1: two
+# single-node complexes whose Φ differ by one ulp; stock's ``max`` over
+# ``PyPhiFloat`` keeps the first one visited. R2: the cause state is a
+# mathematical tie. R3 (deterministic): the cause states (1, 0) and (0, 1)
+# tie mathematically but stock's rounding separates them by one ulp.
+REVIEW_SBN_R1 = [
+    [EPS, 1 - EPS, EPS],
+    [1 - EPS, 1.0, 0.0],
+    [EPS, 1.0, 1.0],
+    [0.0, EPS, 1 - EPS],
+    [1.0, 1 - EPS, 1.0],
+    [0.0, EPS, 1 - EPS],
+    [EPS, 1.0, EPS],
+    [EPS, 1 - EPS, 1.0],
+]
+REVIEW_SBN_R2 = [
+    [0.0, 1.0, 1 - EPS],
+    [1 - EPS, 1 - EPS, EPS],
+    [1 - EPS, 1 - EPS, EPS],
+    [EPS, EPS, EPS],
+    [1 - EPS, 1.0, EPS],
+    [1 - EPS, 1 - EPS, 1 - EPS],
+    [EPS, EPS, EPS],
+    [1 - EPS, 1 - EPS, 1 - EPS],
+]
+REVIEW_SBN_R3 = [
+    [0, 1, 1],
+    [1, 1, 0],
+    [1, 1, 0],
+    [0, 0, 0],
+    [1, 1, 0],
+    [1, 1, 1],
+    [0, 0, 0],
+    [1, 1, 1],
+]
+
+
+def review_pair(sbn):
+    sbn = np.asarray(sbn, dtype=float)
+    cm = np.ones((3, 3), dtype=int)
+    stock_network = Network(sbn, cm=cm)
+    network, _sbs = mv_network_from_sbn(sbn, cm, None)
+    return stock_network, network
+
+
+class TestTieRegressions:
+    """Cases where ties must resolve exactly as stock resolves them."""
+
+    def test_r1_complex_tie_within_precision(self):
+        stock_network, network = review_pair(REVIEW_SBN_R1)
+        state = (1, 0, 0)
+        phis = {}
+        for nodes in [(1,), (2,)]:
+            stock_phi = float(new_big_phi.sia(Subsystem(stock_network, state, nodes)).phi)
+            our_phi = float(sia(MultivaluedSubsystem(network, state, nodes)).phi)
+            assert our_phi == stock_phi
+            phis[nodes] = stock_phi
+        # One ulp apart: a strict ``>`` would pick (1,), stock keeps (2,).
+        assert phis[(1,)] != phis[(2,)]
+        assert abs(phis[(1,)] - phis[(2,)]) < 1e-13
+        stock_complex = new_big_phi.maximal_complex(stock_network, state)
+        our_complex = maximal_complex(network, state)
+        assert tuple(stock_complex.node_indices) == (2,)
+        assert tuple(our_complex.node_indices) == (2,)
+        assert float(our_complex.phi) == float(stock_complex.phi)
+
+    def test_r2_cause_state_tie(self):
+        stock_network, network = review_pair(REVIEW_SBN_R2)
+        state, nodes = (1, 0, 0), (0, 1)
+        stock_sia = new_big_phi.sia(Subsystem(stock_network, state, nodes))
+        our_sia = sia(MultivaluedSubsystem(network, state, nodes))
+        assert tuple(stock_sia.system_state[Direction.CAUSE].state) == (0, 1)
+        assert_same_sia(stock_sia, our_sia, "R2", tol=1e-9)
+
+    def test_r3_deterministic_tie_is_bit_identical(self):
+        stock_network, network = review_pair(REVIEW_SBN_R3)
+        state, nodes = (1, 1, 0), (1, 2)
+        stock_subsystem = Subsystem(stock_network, state, nodes)
+        subsystem = MultivaluedSubsystem(network, state, nodes)
+        expected = stock_subsystem.intrinsic_information(Direction.CAUSE, nodes, nodes)
+        actual = subsystem.intrinsic_information(Direction.CAUSE, nodes, nodes)
+        assert tuple(expected.state) == (0, 1)
+        assert tuple(actual.state) == tuple(expected.state)
+        assert [tuple(t.state) for t in actual.ties] == [
+            tuple(t.state) for t in expected.ties
+        ]
+        # Deterministic TPM: the whole computation is bit-identical.
+        for purview_state in all_states(2):
+            assert float(
+                subsystem.intrinsic_information(
+                    Direction.CAUSE, nodes, nodes, states=[purview_state]
+                ).intrinsic_information
+            ) == float(
+                stock_subsystem.intrinsic_information(
+                    Direction.CAUSE, nodes, nodes, states=[purview_state]
+                ).intrinsic_information
+            )
+        stock_sia = new_big_phi.sia(stock_subsystem)
+        our_sia = sia(subsystem)
+        assert_same_sia(stock_sia, our_sia, "R3", tol=0.0)
+
+    @pytest.mark.slow
+    def test_symmetric_copy_pairs_four_nodes(self):
+        # Two disjoint noisy copy pairs, p = 0.2 + 0.6 * partner: (0, 1) and
+        # (2, 3) tie exactly in every state; stock's visiting order reaches
+        # (2, 3) first.
+        rules = tuple(
+            (lambda partner: (lambda state: 0.2 + 0.6 * state[partner]))(partner)
+            for partner in (1, 0, 3, 2)
+        )
+        sbn = binary_sbn(rules)
+        cm = cm_from_sbn(sbn)
+        labels = ("A", "B", "C", "D")
+        stock_network = Network(sbn, cm=cm, node_labels=labels)
+        network, _sbs = mv_network_from_sbn(sbn, cm, labels)
+        for state in all_states(4):
+            stock_complex = new_big_phi.maximal_complex(stock_network, state)
+            our_complex = maximal_complex(network, state)
+            assert tuple(stock_complex.node_indices) == (2, 3), state
+            assert tuple(our_complex.node_indices) == (2, 3), state
+            assert float(our_complex.phi) == pytest.approx(
+                float(stock_complex.phi), abs=1e-9
+            )
+        assert_binary_parity_networks(stock_network, network, 4, "copy-pairs")
+
+
 class TestTernaryAndMixedRadix:
     """Exact Φ_s, distinctions, relations, and complexes off radix 2."""
 
@@ -231,7 +539,7 @@ class TestTernaryAndMixedRadix:
         sbs = deterministic_sbs((3, 3, 3), ternary_triad_next)
         assert sbs.shape == (27, 27)
         network = MultivaluedNetwork(
-            sbs, (3, 3, 3), cm=TRIAD_CM, node_labels=('W', 'S', 'C')
+            sbs, (3, 3, 3), cm=TRIAD_CM, node_labels=("W", "S", "C")
         )
         state = (1, 1, 1)
         phi = exact_phi(network, state)
@@ -246,22 +554,29 @@ class TestTernaryAndMixedRadix:
         assert structure.relations.sum_phi() > 0.0
         assert math.isfinite(structure.big_phi)
 
-        # The major complex need not be the whole system. Here each mediated
-        # pair out-integrates the full triad; largest-first search keeps the
-        # first of those tied pairs, (W, S).
+        # The major complex need not be the whole system. The rule and the
+        # state are symmetric under W <-> C, so the pairs (W, S) and (S, C)
+        # tie, and each out-integrates the full triad. The search visits
+        # subsystems in stock order (``utils.powerset(..., reverse=True)``),
+        # so (S, C) is seen first and, as in stock ``maximal_complex``, the
+        # first subsystem at the maximum wins.
+        phi_ws = float(sia(MultivaluedSubsystem(network, state, (0, 1))).phi)
+        phi_sc = float(sia(MultivaluedSubsystem(network, state, (1, 2))).phi)
+        assert phi_ws == pytest.approx(phi_sc, abs=PHI_TOL)
+        assert phi_sc > phi
         complex_ = maximal_complex(network, state)
-        assert float(complex_.phi) > phi
-        assert tuple(complex_.node_indices) == (0, 1)
+        assert float(complex_.phi) == pytest.approx(phi_sc, abs=PHI_TOL)
+        assert tuple(complex_.node_indices) == (1, 2)
 
     def test_ternary_factored_system_has_zero_phi(self):
         sbs = deterministic_sbs((3, 3, 3), lambda state: state)
         network = MultivaluedNetwork(
-            sbs, (3, 3, 3), cm=np.eye(3), node_labels=('A', 'B', 'C')
+            sbs, (3, 3, 3), cm=np.eye(3), node_labels=("A", "B", "C")
         )
         assert exact_phi(network, (1, 2, 0)) == pytest.approx(0.0, abs=PHI_TOL)
 
         disconnected = MultivaluedNetwork(
-            sbs, (3, 3, 3), cm=np.zeros((3, 3)), node_labels=('A', 'B', 'C')
+            sbs, (3, 3, 3), cm=np.zeros((3, 3)), node_labels=("A", "B", "C")
         )
         assert exact_phi(disconnected, (0, 0, 0)) == pytest.approx(0.0, abs=PHI_TOL)
         assert float(maximal_complex(disconnected, (0, 0, 0)).phi) == pytest.approx(
@@ -273,13 +588,11 @@ class TestTernaryAndMixedRadix:
         sbs = deterministic_sbs(radix, mixed_radix_next)
         assert sbs.shape == (12, 12)
         network = MultivaluedNetwork(
-            sbs, radix, cm=TRIAD_CM, node_labels=('A', 'B', 'C')
+            sbs, radix, cm=TRIAD_CM, node_labels=("A", "B", "C")
         )
-        # (1, 1, 1): B' = 1+1 = 2, A' = C' = 1, so the state is reachable
-        # from itself only if B' == 1. Use the image (1, 2, 1), which
-        # (1, 1, 1) and (1, 2, 1) both... check a fixed point below.
+        # (1, 2, 1) is a fixed point: A' = C' = 1 because B > 0, and
+        # B' = A + C = 2. It is therefore reachable (from itself).
         state = (1, 2, 1)
-        # A' = 1 because B>0, B' = 1+1 = 2, C' = 1. Fixed point, reachable.
         phi = exact_phi(network, state)
         assert math.isfinite(phi)
         assert phi > 0.0

@@ -11,8 +11,11 @@ _Next version_
 - Added `pyphi.tpm.simulate()`
 - Added opt-in `pyphi.multivalued` for IIT 4.0 on per-node alphabets
   ``k_i >= 2`` (ternary and mixed radix). Binary `ExplicitTPM` / `Subsystem`
-  behavior is unchanged; binary networks match `new_big_phi` to machine
-  precision.
+  behavior is unchanged. Binary networks match `new_big_phi` bit for bit when
+  the state-by-state TPM encodes the node marginals exactly (deterministic or
+  dyadic probabilities); otherwise Φ agrees to about 1e-9 absolute, and ties
+  that are exact in real arithmetic can resolve differently (see the
+  `pyphi.multivalued` docstring).
 
 
 ### API changes

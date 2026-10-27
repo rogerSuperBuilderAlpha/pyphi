@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # combinatorics.py
 """Combinatorial utilities."""
 

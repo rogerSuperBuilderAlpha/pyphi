@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Multivalued Network for the opt-in IIT 4.0 mixed-radix path."""
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ class MultivaluedNetwork(Network):
         if isinstance(tpm, MultivaluedExplicitTPM):
             if tuple(tpm.num_states_per_node) != tuple(num_states_per_node):
                 raise ValueError(
-                    'tpm.num_states_per_node does not match constructor argument'
+                    "tpm.num_states_per_node does not match constructor argument"
                 )
             self._tpm = tpm
         else:
@@ -57,10 +56,10 @@ class MultivaluedNetwork(Network):
 
         # Stock validate.network re-calls ExplicitTPM.validate and assumes
         # binary SBN layout; validate CM shape ourselves only.
-        if self._cm.shape[0] != self.size:
+        if self._cm.shape != (self.size, self.size):
             raise ValueError(
-                'Connectivity matrix must be NxN, where N is the '
-                'number of nodes in the network.'
+                "Connectivity matrix must be NxN, where N is the "
+                "number of nodes in the network."
             )
 
     @property
@@ -86,6 +85,18 @@ class MultivaluedNetwork(Network):
     def sbs(self) -> np.ndarray:
         """Preserved state-by-state TPM (copy)."""
         return self._tpm.sbs_copy()
+
+    def __eq__(self, other) -> bool:
+        """Networks are equal if they have the same alphabet, TPM and CM."""
+        return (
+            isinstance(other, MultivaluedNetwork)
+            and self.num_states_per_node == other.num_states_per_node
+            and self._tpm.array_equal(other._tpm)
+            and np.array_equal(self.cm, other.cm)
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.num_states_per_node, hash(self._tpm), self._cm_hash))
 
     def __repr__(self) -> str:
         return (

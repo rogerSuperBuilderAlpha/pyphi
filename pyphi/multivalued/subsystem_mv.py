@@ -1,31 +1,37 @@
-# -*- coding: utf-8 -*-
 """Multivalued Subsystem — IIT-4.0 repertoires over mixed-radix SBS TPMs."""
 
 from __future__ import annotations
 
 from typing import Iterable, Sequence, Tuple
 
+import functools
+
 import numpy as np
 
-from pyphi import connectivity, metrics
+from pyphi import connectivity, distribution, metrics
 from pyphi import utils as pyphi_utils
 from pyphi import validate
 from pyphi.conf import config, fallback
 from pyphi.connectivity import get_inputs_from_cm
 from pyphi.direction import Direction
+from pyphi.exceptions import StateUnreachableError
 from pyphi.models.cuts import NullCut
 from pyphi.models.mechanism import RepertoireIrreducibilityAnalysis, StateSpecification
 
-from .conditional_independence import encode_state
 from .distinctions import DistinctionMethods
 from .network import MultivaluedNetwork
 from .tpm import MultivaluedTPMError
 from .utils_mv import (
     all_states_mixed,
-    cut_node_tpm,
+    backward_node_tpms,
+    condition_node_tpm,
     factorize_node_tpms,
+    marginalize_out_mv,
     max_entropy_mv,
+    node_tpm_columns,
+    probability_of_state,
     repertoire_shape_mv,
+    stack_node_tpm,
     state_of,
 )
 
@@ -45,7 +51,7 @@ class MultivaluedSubsystem(DistinctionMethods):
         cut=None,
     ):
         if not isinstance(network, MultivaluedNetwork):
-            raise TypeError('MultivaluedSubsystem requires MultivaluedNetwork')
+            raise TypeError("MultivaluedSubsystem requires MultivaluedNetwork")
         self.network = network
         self.node_labels = network.node_labels
         self.node_indices = self.node_labels.coerce_to_indices(nodes)
@@ -78,29 +84,57 @@ class MultivaluedSubsystem(DistinctionMethods):
             i: self.state[i] for i in self.external_indices
         }
 
-        sbs = network.sbs()
-        raw_node_tpms = factorize_node_tpms(sbs, self.num_states_per_node)
+        # Same construction, in the same order of floating-point operations,
+        # as stock ``Subsystem`` + ``Node``, so radix-2 results are
+        # bit-identical to stock and ties resolve the same way:
+        #   1. effect TPM = network TPM conditioned on the background state;
+        #   2. cause TPM = ``pyphi.tpm.backward_tpm`` (background weighted by
+        #      its likelihood of having produced the current state);
+        #   3. per node, marginalize out the non-inputs under the cut cm and,
+        #      for binary nodes, derive P(off) = 1 - P(on) as ``Node`` does.
+        # Both TPMs come from the uncut network TPM; the cut only decides
+        # which parents each node marginalizes out in step 3.
+        ks = self.num_states_per_node
+        raw_node_tpms = factorize_node_tpms(network.sbs(), ks)
+        # Stock carries binary nodes as a single P(on) column (state-by-node);
+        # k > 2 nodes carry all k columns.
+        columns = [node_tpm_columns(tpm) for tpm in raw_node_tpms]
+        conditioned = [condition_node_tpm(col, self._background) for col in columns]
+
+        if config.VALIDATE_SUBSYSTEM_STATES:
+            self._validate_state_reachable(conditioned)
+
+        backward = backward_node_tpms(columns, self.state, self.node_indices)
+
         self._effect_by_node = {}
+        self._cause_by_node = {}
+        all_axes = set(range(len(ks)))
         for i in self.node_indices:
-            inputs = set(get_inputs_from_cm(i, self.cm))
-            self._effect_by_node[i] = cut_node_tpm(
-                raw_node_tpms[i], i, inputs, self.num_states_per_node
-            )
-
-        # Reachability: some previous state must map to current with p>0.
-        curr_idx = encode_state(self.state, self.num_states_per_node)
-        col = sbs[:, curr_idx].astype(float)
-        if col.sum() <= 0.0:
-            from pyphi.exceptions import StateUnreachableError
-
-            raise StateUnreachableError(self.state)
+            non_inputs = all_axes - set(get_inputs_from_cm(i, self.cm))
+            self._effect_by_node[i] = stack_node_tpm(conditioned[i], non_inputs, ks[i])
+            self._cause_by_node[i] = stack_node_tpm(backward[i], non_inputs, ks[i])
 
         self.nodes = tuple(self.node_indices)
 
-    def _merge_background(self, condition: dict[int, int]) -> dict[int, int]:
-        merged = dict(self._background)
-        merged.update(condition)
-        return merged
+    def _validate_state_reachable(self, conditioned_node_tpms) -> None:
+        """Mirror ``validate.state_reachable``.
+
+        With the background fixed to its current state, some previous state of
+        the subsystem nodes must give every subsystem node its current state
+        with nonzero probability.
+        """
+        possible = np.ones(
+            [
+                k if i in self.node_indices else 1
+                for i, k in enumerate(self.num_states_per_node)
+            ],
+            dtype=bool,
+        )
+        for i in self.node_indices:
+            pr = probability_of_state(conditioned_node_tpms[i], self.state[i])
+            possible = possible & (pr > 0.0)
+        if not np.any(possible):
+            raise StateUnreachableError(self.state)
 
     @property
     def proper_state(self) -> tuple[int, ...]:
@@ -124,35 +158,29 @@ class MultivaluedSubsystem(DistinctionMethods):
     # --- repertoires ---
 
     def _effect_single_node(
-        self, condition: dict[int, int], purview_node: int
+        self,
+        condition: dict[int, int],
+        purview_node: int,
+        direction: Direction = Direction.EFFECT,
     ) -> np.ndarray:
-        tpm = self._effect_by_node[purview_node]
-        ks = self.num_states_per_node
-        k_p = ks[purview_node]
-        condition = self._merge_background(condition)
-        free = [j for j in range(len(ks)) if j not in condition]
-        acc = np.zeros(k_p, dtype=float)
-        free_states = list(all_states_mixed([ks[j] for j in free])) if free else [()]
-        n_free = len(free_states)
-        for free_st in free_states:
-            prev = [0] * len(ks)
-            for j, s in condition.items():
-                prev[j] = s
-            for j, s in zip(free, free_st):
-                prev[j] = s
-            acc += tpm[tuple(prev)]
-        acc /= float(n_free)
-        out = np.zeros(
+        # Stock ``_single_node_effect_repertoire`` reads the node's backward
+        # TPM when asked for the CAUSE direction (forward cause repertoire).
+        if direction == Direction.CAUSE:
+            tpm = self._cause_by_node[purview_node]
+        elif direction == Direction.EFFECT:
+            tpm = self._effect_by_node[purview_node]
+        else:
+            return validate.direction(direction)
+        # Background and non-input axes are already singletons in the node
+        # TPM, so only the inputs outside the mechanism remain to average.
+        inputs = set(get_inputs_from_cm(purview_node, self.cm))
+        tpm = condition_node_tpm(tpm, condition)
+        tpm = marginalize_out_mv(tpm, inputs - set(condition))
+        return tpm.reshape(
             repertoire_shape_mv(
-                self.network.node_indices, (purview_node,), ks
-            ),
-            dtype=float,
+                self.network.node_indices, (purview_node,), self.num_states_per_node
+            )
         )
-        for s in range(k_p):
-            idx = [0] * len(ks)
-            idx[purview_node] = s
-            out[tuple(idx)] = acc[s]
-        return out
 
     def effect_repertoire(
         self,
@@ -172,18 +200,19 @@ class MultivaluedSubsystem(DistinctionMethods):
             ),
             dtype=float,
         )
-        for p in purview:
-            joint = joint * self._effect_single_node(condition, p)
-        return joint
+        return joint * functools.reduce(
+            np.multiply,
+            [self._effect_single_node(condition, p, direction) for p in purview],
+        )
 
     def cause_repertoire(self, mechanism, purview, **kwargs):
         """Cause repertoire as the normalized product of single-node causes.
 
-        Matches stock IIT 4.0 on a full system: each mechanism node contributes
-        ``P(X_m = s_m | previous)``, inputs outside the purview are averaged
-        out, and the product is normalized. Per-node alphabets may differ.
-        Non-input axes are already uniform in ``_effect_by_node``, so averaging
-        them does not change the conditional.
+        Matches stock ``Subsystem._cause_repertoire`` operation for operation:
+        each mechanism node contributes ``P(X_m' = s_m | previous)`` read from
+        its backward TPM (background weighted by its likelihood of producing
+        the current state), its inputs outside the purview are averaged out,
+        and the product is normalized. Per-node alphabets may differ.
         """
         if not purview:
             return np.array([1.0])
@@ -192,19 +221,14 @@ class MultivaluedSubsystem(DistinctionMethods):
         if not mechanism:
             return max_entropy_mv(self.network.node_indices, purview, ks)
         purview_set = set(purview)
-        joint = np.ones(shape, dtype=float)
-        n = len(ks)
-        non_purview = tuple(j for j in range(n) if j not in purview_set)
+        singles = []
         for m in mechanism:
-            # P(X_m' = current state | previous). Shape ``ks``.
-            p = np.asarray(self._effect_by_node[m][..., self.state[m]], dtype=float)
-            if non_purview:
-                p = p.mean(axis=non_purview, keepdims=True)
-            joint = joint * p
-        total = float(joint.sum())
-        if total == 0.0:
-            return joint
-        return joint / total
+            inputs = set(get_inputs_from_cm(m, self.cm))
+            tpm = self._cause_by_node[m][..., self.state[m]]
+            singles.append(marginalize_out_mv(tpm, inputs - purview_set))
+        joint = np.ones(shape, dtype=float)
+        joint *= functools.reduce(np.multiply, singles)
+        return distribution.normalize(joint)
 
     def repertoire(self, direction, mechanism, purview, **kwargs):
         if direction == Direction.CAUSE:
@@ -223,7 +247,9 @@ class MultivaluedSubsystem(DistinctionMethods):
         self, mechanism, purview, purview_state, **kwargs
     ):
         rep = self.forward_effect_repertoire(mechanism, purview, **kwargs)
-        return float(rep.squeeze()[purview_state] if purview else 1.0)
+        # numpy scalars, as in stock: 0/0 and p/0 in the GID must give
+        # nan/inf (then ``nan_to_num``), not raise ZeroDivisionError.
+        return rep.squeeze()[purview_state] if purview else np.float64(1.0)
 
     def forward_cause_repertoire(
         self, mechanism, purview, purview_state=None
@@ -253,7 +279,7 @@ class MultivaluedSubsystem(DistinctionMethods):
                 mechanism_state=ps,
                 direction=Direction.CAUSE,
             )
-            val = float(er.squeeze()[mechanism_state]) if mechanism else 1.0
+            val = er.squeeze()[mechanism_state] if mechanism else np.float64(1.0)
             if purview:
                 repertoire[ps] = val
             else:
@@ -281,13 +307,16 @@ class MultivaluedSubsystem(DistinctionMethods):
     def forward_cause_probability(
         self, mechanism, purview, purview_state, **kwargs
     ):
+        # Roles switched, read from the backward TPM (stock
+        # ``repertoire.forward_cause_probability``).
         er = self.effect_repertoire(
             mechanism=purview,
             purview=mechanism,
             mechanism_state=purview_state,
+            direction=Direction.CAUSE,
         )
         mechanism_state = state_of(mechanism, self.state)
-        return float(er.squeeze()[mechanism_state]) if mechanism else 1.0
+        return er.squeeze()[mechanism_state] if mechanism else np.float64(1.0)
 
     def forward_probability(
         self, direction, mechanism, purview, purview_state, **kwargs
@@ -350,12 +379,12 @@ class MultivaluedSubsystem(DistinctionMethods):
         repertoire_distance = fallback(
             repertoire_distance, config.REPERTOIRE_DISTANCE
         )
-        if repertoire_distance == 'GENERALIZED_INTRINSIC_DIFFERENCE':
-            if 'state' not in kwargs:
+        if repertoire_distance == "GENERALIZED_INTRINSIC_DIFFERENCE":
+            if "state" not in kwargs:
                 raise ValueError(
-                    'must provide purview state for generalized intrinsic difference'
+                    "must provide purview state for generalized intrinsic difference"
                 )
-            purview_state = kwargs.pop('state')
+            purview_state = kwargs.pop("state")
             prs = [
                 self.forward_probability(
                     direction,
@@ -368,7 +397,7 @@ class MultivaluedSubsystem(DistinctionMethods):
                 )
                 for part in partition
             ]
-            return float(np.prod(prs))
+            return np.prod(prs)
         repertoires = [
             self.repertoire(direction, part.mechanism, part.purview, **kwargs)
             for part in partition
@@ -393,7 +422,7 @@ class MultivaluedSubsystem(DistinctionMethods):
                 )
             ) if purview else [()]
 
-        if repertoire_distance == 'GENERALIZED_INTRINSIC_DIFFERENCE':
+        if repertoire_distance == "GENERALIZED_INTRINSIC_DIFFERENCE":
             selectivity_repertoire = self.repertoire(
                 direction, mechanism, purview
             )
@@ -410,7 +439,7 @@ class MultivaluedSubsystem(DistinctionMethods):
             ).squeeze()
 
             def evaluate_state(state):
-                return gid[state] if purview else float(gid)
+                return gid[state] if purview else gid
 
         else:
             repertoire = self.repertoire(direction, mechanism, purview)
@@ -458,10 +487,10 @@ class MultivaluedSubsystem(DistinctionMethods):
         )
         if repertoire is None:
             repertoire = self.repertoire(direction, mechanism, purview)
-        if repertoire_distance == 'GENERALIZED_INTRINSIC_DIFFERENCE':
-            purview_state = kwargs['state'].state
-            selectivity = repertoire.squeeze()[purview_state] if purview else float(
-                repertoire.squeeze()
+        if repertoire_distance == "GENERALIZED_INTRINSIC_DIFFERENCE":
+            purview_state = kwargs["state"].state
+            selectivity = (
+                repertoire.squeeze()[purview_state] if purview else repertoire.squeeze()
             )
             forward_pr = self.forward_probability(
                 direction, mechanism, purview, purview_state
@@ -487,7 +516,7 @@ class MultivaluedSubsystem(DistinctionMethods):
                 partitioned_repertoire=partitioned_pr,
                 mechanism_state=state_of(mechanism, self.state),
                 purview_state=state_of(purview, self.state),
-                specified_state=kwargs.get('state'),
+                specified_state=kwargs.get("state"),
                 node_labels=self.node_labels,
                 selectivity=selectivity,
             )

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # models/cuts.py
 """Objects that represent partitions of sets of nodes."""
 
@@ -111,13 +110,13 @@ class NullCut(_CutBase):
         return np.zeros((n, n))
 
     def to_json(self):
-        return {'indices': self.indices}
+        return {"indices": self.indices}
 
     def __repr__(self):
-        return fmt.make_repr(self, ['indices'])
+        return fmt.make_repr(self, ["indices"])
 
     def __str__(self):
-        return 'NullCut({})'.format(self.indices)
+        return "NullCut({})".format(self.indices)
 
     @cmp.sametype
     def __eq__(self, other):
@@ -139,7 +138,7 @@ class Cut(_CutBase):
 
     # Don't construct an attribute dictionary; see
     # https://docs.python.org/3.3/reference/datamodel.html#notes-on-using-slots
-    __slots__ = ('from_nodes', 'to_nodes', 'node_labels')
+    __slots__ = ("from_nodes", "to_nodes", "node_labels")
 
     def __init__(self, from_nodes, to_nodes, node_labels=None):
         self.from_nodes = from_nodes
@@ -177,7 +176,7 @@ class Cut(_CutBase):
         return hash((self.from_nodes, self.to_nodes))
 
     def __repr__(self):
-        return fmt.make_repr(self, ['from_nodes', 'to_nodes'])
+        return fmt.make_repr(self, ["from_nodes", "to_nodes"])
 
     def __str__(self):
         return fmt.fmt_cut(self)
@@ -192,12 +191,12 @@ class Cut(_CutBase):
 
     def to_json(self):
         """Return a JSON-serializable representation."""
-        return {'from_nodes': self.from_nodes, 'to_nodes': self.to_nodes}
+        return {"from_nodes": self.from_nodes, "to_nodes": self.to_nodes}
 
     @classmethod
     def from_json(cls, data):
         """Return a Cut object from a JSON-serializable representation."""
-        return cls(data['from_nodes'], data['to_nodes'])
+        return cls(data["from_nodes"], data["to_nodes"])
 
 
 class SystemPartition(Cut):
@@ -215,21 +214,21 @@ class SystemPartition(Cut):
 
     def to_json(self):
         return {
-            'direction': self.direction,
+            "direction": self.direction,
             **super().to_json(),
         }
 
     @classmethod
     def from_json(cls, data):
         """Return a SystemPartition object from a JSON-serializable representation."""
-        return cls(data['direction'], data['from_nodes'], data['to_nodes'])
+        return cls(data["direction"], data["from_nodes"], data["to_nodes"])
 
 
 class CompleteSystemPartition:
     """Represents the SystemPartition that destroys all distinctions & relations."""
 
     def __repr__(self):
-        return 'Complete'
+        return "Complete"
 
 
 class KCut(_CutBase):
@@ -265,14 +264,14 @@ class KCut(_CutBase):
         return hash((self.direction, self.partition))
 
     def __repr__(self):
-        return fmt.make_repr(self, ['direction', 'partition'])
+        return fmt.make_repr(self, ["direction", "partition"])
 
     # TODO: improve
     def __str__(self):
         return fmt.fmt_kcut(self)
 
     def to_json(self):
-        return {'direction': self.direction, 'partition': self.partition}
+        return {"direction": self.direction, "partition": self.partition}
 
 
 class ActualCut(KCut):
@@ -315,7 +314,7 @@ class GeneralKCut(_CutBase):
         return hash((self.node_indices, utils.np_hash(self._cut_matrix)))
 
     def __repr__(self):
-        return fmt.make_repr(self, ['node_indices', '_cut_matrix'])
+        return fmt.make_repr(self, ["node_indices", "_cut_matrix"])
 
     def __str__(self):
         # TODO: improve
@@ -327,9 +326,9 @@ class GeneralKCut(_CutBase):
     @classmethod
     def from_json(cls, data):
         return cls(
-            node_indices=data['node_indices'],
-            cut_matrix=data['_cut_matrix'],
-            node_labels=data['node_labels'],
+            node_indices=data["node_indices"],
+            cut_matrix=data["_cut_matrix"],
+            node_labels=data["node_labels"],
         )
 
 
@@ -363,20 +362,20 @@ class GeneralSetPartition(GeneralKCut):
             parts = map(str, self.parts)
         return (
             f"{self.num_parts} parts: "
-            + '{'
-            + ','.join(''.join(part) for part in parts)
-            + '}\n'
+            + "{"
+            + ",".join("".join(part) for part in parts)
+            + "}\n"
             + super().__str__()
         )
 
     def to_json(self):
         dct = self.__dict__.copy()
-        del dct['parts']
+        del dct["parts"]
         return dct
 
     @classmethod
     def from_json(cls, data):
-        data['cut_matrix'] = np.array(data.pop('_cut_matrix'))
+        data["cut_matrix"] = np.array(data.pop("_cut_matrix"))
         return cls(**data)
 
     # TODO(4.0) add to other classes after consolidating partitions
@@ -384,7 +383,7 @@ class GeneralSetPartition(GeneralKCut):
         if node_labels is None:
             node_labels = self.node_labels
         if not len(node_indices) == len(self.node_indices):
-            raise ValueError('New node indices must have same length as the old.')
+            raise ValueError("New node indices must have same length as the old.")
         return GeneralSetPartition(
             node_indices,
             self._cut_matrix,
@@ -395,7 +394,7 @@ class GeneralSetPartition(GeneralKCut):
 
 class CompleteGeneralSetPartition(CompleteGeneralKCut):
     def __str__(self):
-        return 'Complete\n' + super().__str__()
+        return "Complete\n" + super().__str__()
 
 
 @dataclass(order=True, frozen=True)
@@ -432,13 +431,13 @@ class Part:
 
     def to_json(self):
         """Return a JSON-serializable representation."""
-        return {'mechanism': self.mechanism, 'purview': self.purview}
+        return {"mechanism": self.mechanism, "purview": self.purview}
 
 
 class KPartition(Sequence, _CutBase):
     """A partition with an arbitrary number of parts."""
 
-    __slots__ = ['parts', 'node_labels', '_mechanism', '_purview']
+    __slots__ = ["parts", "node_labels", "_mechanism", "_purview"]
 
     def __init__(self, *parts, node_labels=None):
         self.parts = parts
@@ -467,7 +466,7 @@ class KPartition(Sequence, _CutBase):
         return fmt.fmt_partition(self)
 
     def __repr__(self):
-        return fmt.make_repr(self, ['parts', 'node_labels'])
+        return fmt.make_repr(self, ["parts", "node_labels"])
 
     @property
     def mechanism(self):
@@ -523,11 +522,11 @@ class KPartition(Sequence, _CutBase):
         return cm
 
     def to_json(self):
-        return {'parts': list(self)}
+        return {"parts": list(self)}
 
     @classmethod
     def from_json(cls, dct):
-        return cls(*dct['parts'])
+        return cls(*dct["parts"])
 
 
 class Bipartition(KPartition):
@@ -542,11 +541,11 @@ class Bipartition(KPartition):
 
     def to_json(self):
         """Return a JSON-serializable representation."""
-        return {'part0': self[0], 'part1': self[1]}
+        return {"part0": self[0], "part1": self[1]}
 
     @classmethod
     def from_json(cls, dct):
-        return cls(dct['part0'], dct['part1'])
+        return cls(dct["part0"], dct["part1"])
 
 
 class Tripartition(KPartition):

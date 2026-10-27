@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """SBS-native ExplicitTPM for multivalued (mixed-radix) alphabets.
 
 Keeps the TPM in square state-by-state form. Never calls PyPhi's binary
@@ -37,7 +36,7 @@ class MultivaluedExplicitTPM:
     ):
         self._num_states_per_node = tuple(int(k) for k in num_states_per_node)
         if not self._num_states_per_node:
-            raise ValueError('num_states_per_node must be non-empty')
+            raise ValueError("num_states_per_node must be non-empty")
         if any(k < 2 for k in self._num_states_per_node):
             raise ValueError(
                 f"each alphabet size must be >= 2; got {self._num_states_per_node}"
@@ -97,10 +96,10 @@ class MultivaluedExplicitTPM:
     def validate(self, check_independence: bool = True) -> bool:
         if (self._tpm < 0.0).any() or (self._tpm > 1.0).any():
             raise ValueError(
-                'Invalid TPM: probabilities must be in the interval [0, 1].'
+                "Invalid TPM: probabilities must be in the interval [0, 1]."
             )
         if not np.allclose(np.sum(self._tpm, axis=1), 1.0, atol=1e-12):
-            raise ValueError('Invalid TPM: probabilities must sum to 1.')
+            raise ValueError("Invalid TPM: probabilities must sum to 1.")
         if check_independence:
             self.conditionally_independent()
         return True
@@ -114,16 +113,16 @@ class MultivaluedExplicitTPM:
             self._tpm, self._num_states_per_node
         ):
             raise ConditionallyDependentError(
-                'TPM is not conditionally independent under mixed-radix '
-                'categorical factorization (SBS-native check; no binary SBN).'
+                "TPM is not conditionally independent under mixed-radix "
+                "categorical factorization (SBS-native check; no binary SBN)."
             )
         return True
 
     def to_multidimensional_state_by_node(self):
         raise MultivaluedTPMError(
-            'SBS-native M1 TPM has no binary multidimensional SBN form. '
-            'M2 must implement categorical / mixed-radix conditioning and '
-            'repertoires without int(log2) conversion.'
+            "SBS-native M1 TPM has no binary multidimensional SBN form. "
+            "M2 must implement categorical / mixed-radix conditioning and "
+            "repertoires without int(log2) conversion."
         )
 
     def condition_tpm(self, condition: Mapping[int, int]):
@@ -132,9 +131,9 @@ class MultivaluedExplicitTPM:
         if not condition:
             return self
         raise MultivaluedTPMError(
-            'M1 blocker past ExplicitTPM: non-empty condition_tpm requires '
-            'mixed-radix SBS (or categorical) conditioning. Stock IIT-4.0 '
-            'Subsystem.condition_tpm assumes multidimensional binary SBN '
+            "M1 blocker past ExplicitTPM: non-empty condition_tpm requires "
+            "mixed-radix SBS (or categorical) conditioning. Stock IIT-4.0 "
+            "Subsystem.condition_tpm assumes multidimensional binary SBN "
             f"layout; refused condition={dict(condition)}."
         )
 
@@ -144,6 +143,20 @@ class MultivaluedExplicitTPM:
 
     def __array__(self, dtype=None):
         return np.asarray(self._tpm, dtype=dtype)
+
+    def array_equal(self, other: object) -> bool:
+        """Same alphabet and the same SBS matrix (``ExplicitTPM.array_equal``)."""
+        return (
+            isinstance(other, MultivaluedExplicitTPM)
+            and self._num_states_per_node == other._num_states_per_node
+            and np.array_equal(self._tpm, other._tpm)
+        )
+
+    def __eq__(self, other: object) -> bool:
+        return self.array_equal(other)
+
+    def __hash__(self) -> int:
+        return hash((self._num_states_per_node, self._hash))
 
     def __repr__(self) -> str:
         return (

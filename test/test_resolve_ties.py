@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from pyphi import config, resolve_ties
 
 
@@ -11,7 +10,7 @@ class DummyPhiObject:
 
 def test_resolve_none_returns_objects():
     objects = [DummyPhiObject(1.0, (0,)), DummyPhiObject(2.0, (0, 1))]
-    resolved = list(resolve_ties.resolve(objects, 'NONE', operation=max))
+    resolved = list(resolve_ties.resolve(objects, "NONE", operation=max))
     assert resolved == objects
 
 
@@ -19,7 +18,7 @@ def test_resolve_max_phi_ties():
     low = DummyPhiObject(1.0, (0,))
     high_a = DummyPhiObject(2.0, (0, 1))
     high_b = DummyPhiObject(2.0, (1, 2))
-    resolved = list(resolve_ties.resolve([low, high_a, high_b], 'PHI', operation=max))
+    resolved = list(resolve_ties.resolve([low, high_a, high_b], "PHI", operation=max))
     assert resolved == [high_a, high_b]
 
 
@@ -29,7 +28,7 @@ def test_resolve_multiple_strategies_selects_smallest_purview():
     resolved = list(
         resolve_ties.resolve(
             [larger, smaller],
-            ['PHI', 'NEGATIVE_PURVIEW_SIZE'],
+            ["PHI", "NEGATIVE_PURVIEW_SIZE"],
             operation=max,
         )
     )
@@ -39,7 +38,7 @@ def test_resolve_multiple_strategies_selects_smallest_purview():
 def test_states_uses_config_default():
     low = DummyPhiObject(1.0, (0,))
     high = DummyPhiObject(2.0, (0, 1))
-    with config.override(STATE_TIE_RESOLUTION='PHI'):
+    with config.override(STATE_TIE_RESOLUTION="PHI"):
         resolved = list(resolve_ties.states([low, high]))
     assert resolved == [high]
 
@@ -47,7 +46,7 @@ def test_states_uses_config_default():
 def test_partitions_uses_min_operation():
     low = DummyPhiObject(1.0, (0,))
     high = DummyPhiObject(2.0, (0, 1))
-    with config.override(MIP_TIE_RESOLUTION='PHI'):
+    with config.override(MIP_TIE_RESOLUTION="PHI"):
         resolved = list(resolve_ties.partitions([low, high]))
     assert resolved == [low]
 
@@ -55,6 +54,6 @@ def test_partitions_uses_min_operation():
 def test_purviews_uses_max_operation():
     low = DummyPhiObject(1.0, (0,))
     high = DummyPhiObject(2.0, (0, 1))
-    with config.override(PURVIEW_TIE_RESOLUTION='PHI'):
+    with config.override(PURVIEW_TIE_RESOLUTION="PHI"):
         resolved = list(resolve_ties.purviews([low, high]))
     assert resolved == [high]
