@@ -62,6 +62,13 @@ def factorize_node_tpms(
     """Per-node categorical effect TPMs, shape ``(*ks, k_i)``.
 
     ``tpm[i][prev_state + (s,)] = P(X_i'=s | X=prev)``.
+
+    Each node's marginal is divided by the row sum. The row sum is 1 up to
+    rounding, so this changes values by at most an ulp or so, but it restores
+    exact 0 and 1 where the state-by-state entries were products of exact 0
+    and 1 with inexact factors (a deterministic node next to noisy ones).
+    Those exact values decide reachability and short-circuits, so they must
+    survive the state-by-node -> state-by-state -> marginal round trip.
     """
     ks = tuple(int(k) for k in num_states_per_node)
     n_states = int(np.prod(ks))
@@ -81,6 +88,9 @@ def factorize_node_tpms(
                     continue
                 nxt = decode_state(nxt_idx, ks)
                 tpm_i[prev + (nxt[i],)] += p
+            row_sum = tpm_i[prev].sum()
+            if row_sum != 0.0 and row_sum != 1.0:
+                tpm_i[prev] /= row_sum
         node_tpms.append(tpm_i)
     return node_tpms
 
@@ -115,34 +125,54 @@ def marginalize_out_mv(node_tpm: np.ndarray, axes: Iterable[int]) -> np.ndarray:
     return node_tpm.sum(axis=axes, keepdims=True) / denom
 
 
-def cut_node_tpm(
-    node_tpm: np.ndarray,
-    node_index: int,
-    inputs: set[int],
-    num_states_per_node: Sequence[int],
-) -> np.ndarray:
-    """Marginalize non-input parents out of a node TPM (uniform over them).
+def node_tpm_columns(node_tpm: np.ndarray) -> np.ndarray:
+    """Columns of a node TPM in the form stock carries them.
 
-    The result is broadcast back to the full ``(*ks, k_i)`` shape so callers
-    can index it with any complete previous state.
+    Stock pyphi carries a binary node as a single P(on) column (state-by-node
+    form) and derives P(off) = 1 - P(on) in ``Node``; a node with k > 2 states
+    keeps all k columns. Keeping to that convention makes the radix-2 path's
+    floating-point operations identical to stock's.
     """
-    ks = tuple(int(k) for k in num_states_per_node)
-    k_i = ks[node_index]
-    non_inputs = [j for j in range(len(ks)) if j not in inputs]
-    out = marginalize_out_mv(node_tpm, non_inputs)
-    return np.broadcast_to(out, ks + (k_i,)).copy()
+    if node_tpm.shape[-1] == 2:
+        return node_tpm[..., 1:2]
+    return node_tpm
+
+
+def probability_of_state(columns: np.ndarray, state: int) -> np.ndarray:
+    """P(X_i' = state | previous) from a node's columns (see above)."""
+    if columns.shape[-1] == 1:
+        on = columns[..., 0]
+        return on if state else 1 - on
+    return columns[..., state]
+
+
+def stack_node_tpm(
+    columns: np.ndarray, non_inputs: Iterable[int], k: int
+) -> np.ndarray:
+    """Finish a node TPM the way ``pyphi.node.Node`` does.
+
+    Marginalize the non-input axes out of each column (``marginalize_out``:
+    sum, then divide by the product of the axis sizes), and for a binary node
+    stack ``[1 - on, on]`` on the last axis.
+    """
+    if columns.shape[-1] == 1:
+        on = marginalize_out_mv(columns[..., 0], non_inputs)
+        return np.stack([1 - on, on], axis=-1)
+    assert columns.shape[-1] == k
+    return marginalize_out_mv(columns, non_inputs)
 
 
 def backward_node_tpms(
-    node_tpms: Sequence[np.ndarray],
+    node_columns: Sequence[np.ndarray],
     current_state: Sequence[int],
     system_indices: Iterable[int],
 ) -> list[np.ndarray]:
-    """Per-node backward (cause) TPMs for a subsystem in ``current_state``.
+    """Per-node backward (cause) TPM columns for a subsystem in ``current_state``.
 
-    Mixed-radix analogue of ``pyphi.tpm.backward_tpm``. With ``u`` the full
-    current state, ``s`` the previous state of the system nodes and ``w`` the
-    previous state of the background nodes, each returned array is
+    Mixed-radix analogue of ``pyphi.tpm.backward_tpm``, operation for
+    operation. With ``u`` the full current state, ``s`` the previous state of
+    the system nodes and ``w`` the previous state of the background nodes,
+    each returned array is
 
     .. math::
 
@@ -156,20 +186,30 @@ def backward_node_tpms(
     Raises:
         StateUnreachableError: if no previous state leads to ``current_state``.
     """
-    ks = tuple(node_tpms[0].shape[:-1])
-    n = len(ks)
+    n = len(node_columns)
     system = tuple(sorted(int(i) for i in system_indices))
     background = tuple(j for j in range(n) if j not in system)
     current_state = tuple(int(s) for s in current_state)
 
-    # P(u_t | s_{t-1}, w_{t-1}) over every previous state.
-    pr_current = np.ones(ks, dtype=float)
-    for i, tpm in enumerate(node_tpms):
-        pr_current = pr_current * tpm[..., current_state[i]]
-    normalization = float(pr_current.sum())
+    # p(u_t | s_{t-1}, w_{t-1}); stock's ``probability_of_current_state``.
+    state_probabilities = np.stack(
+        [
+            probability_of_state(col, current_state[i])
+            for i, col in enumerate(node_columns)
+        ],
+        axis=-1,
+    )
+    pr_current_state = state_probabilities.prod(axis=-1, keepdims=True)
+    # Σ_{s_{t-1}} p(u_t | s_{t-1}, w_{t-1})
+    pr_current_state_given_only_background = pr_current_state.sum(
+        axis=system, keepdims=True
+    )
+    normalization = np.sum(pr_current_state)
     if normalization == 0.0:
         raise StateUnreachableError(current_state)
-    # Σ_{s_{t-1}} P(u_t | s_{t-1}, w_{t-1}); singleton on system axes.
-    pr_given_background = pr_current.sum(axis=system, keepdims=True)
-    weight = (pr_given_background / normalization)[..., np.newaxis]
-    return [(tpm * weight).sum(axis=background, keepdims=True) for tpm in node_tpms]
+    return [
+        (col * pr_current_state_given_only_background / normalization).sum(
+            axis=background, keepdims=True
+        )
+        for col in node_columns
+    ]

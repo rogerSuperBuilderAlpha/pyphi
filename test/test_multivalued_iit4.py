@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from pyphi import Network, Subsystem, convert, new_big_phi
+from pyphi import Network, Subsystem, compute, convert, new_big_phi
 from pyphi.conf import config
 from pyphi.exceptions import ConditionallyDependentError
 from pyphi.direction import Direction
@@ -291,27 +291,53 @@ def complex_summary(result):
     return float(result.phi), tuple(getattr(result, "node_indices", None) or ())
 
 
-def assert_binary_parity(seed, n, noisy, tol=1e-9):
-    """Radix-2 multivalued path must match stock pyphi on a random network.
+def assert_same_sia(stock_sia, our_sia, where, tol):
+    """Same Φ, same specified system states, same MIP partition."""
+    assert float(our_sia.phi) == pytest.approx(float(stock_sia.phi), abs=tol), where
+    assert bool(our_sia) == bool(stock_sia), where
+    if stock_sia.system_state is None:
+        assert our_sia.system_state is None, where
+    else:
+        for direction in Direction.both():
+            expected = stock_sia.system_state[direction]
+            actual = our_sia.system_state[direction]
+            assert tuple(actual.state) == tuple(expected.state), (where, direction)
+            assert float(actual.intrinsic_information) == pytest.approx(
+                float(expected.intrinsic_information), abs=tol
+            ), (where, direction)
+    assert our_sia.partition == stock_sia.partition, where
+
+
+def assert_same_distinctions(stock_subsystem, stock_sia, subsystem, our_sia, where, tol):
+    """Same number of congruent distinctions and the same summed φ."""
+    expected = compute.ces(stock_subsystem)
+    actual = subsystem.all_distinctions()
+    if stock_sia.system_state is not None:
+        expected = expected.resolve_congruence(stock_sia.system_state)
+        actual = actual.resolve_congruence(our_sia.system_state)
+    assert len(actual) == len(expected), where
+    assert sorted(c.mechanism for c in actual) == sorted(
+        c.mechanism for c in expected
+    ), where
+    assert actual.sum_phi() == pytest.approx(expected.sum_phi(), abs=tol), where
+
+
+def assert_binary_parity_networks(stock_network, network, n, tag, tol=1e-9):
+    """Radix-2 multivalued path must match stock pyphi on one network.
 
     For every network state and every non-empty subsystem, compares
-    reachability, system Φ, the major complex, and the cause and effect
-    repertoires over every (mechanism, purview) pair.
+    reachability, the system irreducibility analysis (Φ, specified
+    cause/effect states, MIP partition), the congruent distinctions, the
+    major complex, and the cause and effect repertoires over every
+    (mechanism, purview) pair.
     """
-    rng = np.random.default_rng(seed)
-    sbn = random_sbn(rng, n, noisy)
-    cm = cm_from_sbn(sbn)
-    labels = tuple("ABCD"[:n])
-    stock_network = Network(sbn, cm=cm, node_labels=labels)
-    network, _sbs = mv_network_from_sbn(sbn, cm, labels)
-
     for state in all_states(n):
         stock_complex = new_big_phi.maximal_complex(stock_network, state)
         our_complex = maximal_complex(network, state)
         stock_phi, stock_nodes = complex_summary(stock_complex)
         our_phi, our_nodes = complex_summary(our_complex)
-        assert our_phi == pytest.approx(stock_phi, abs=tol), (seed, state)
-        assert our_nodes == stock_nodes, (seed, state)
+        assert our_phi == pytest.approx(stock_phi, abs=tol), (tag, state)
+        assert our_nodes == stock_nodes, (tag, state)
 
         for nodes in powerset(range(n), nonempty=True):
             try:
@@ -324,8 +350,14 @@ def assert_binary_parity(seed, n, noisy, tol=1e-9):
 
             stock_sia = new_big_phi.sia(stock_subsystem)
             our_sia = sia(subsystem)
-            our_phi, stock_phi = float(our_sia.phi), float(stock_sia.phi)
-            assert our_phi == pytest.approx(stock_phi, abs=tol), (seed, state, nodes)
+            where = (tag, state, nodes)
+            assert_same_sia(stock_sia, our_sia, where, tol)
+            # Distinctions for every subsystem of small networks; for larger
+            # ones only the Φ-structure of the whole system (cost).
+            if n <= 3 or len(nodes) == n:
+                assert_same_distinctions(
+                    stock_subsystem, stock_sia, subsystem, our_sia, where, tol
+                )
 
             for mechanism in powerset(nodes, nonempty=True):
                 for purview in powerset(nodes, nonempty=True):
@@ -336,13 +368,24 @@ def assert_binary_parity(seed, n, noisy, tol=1e-9):
                         actual = subsystem.repertoire(direction, mechanism, purview)
                         assert actual.shape == expected.shape
                         assert np.allclose(actual, expected, atol=tol, rtol=0.0), (
-                            seed,
+                            tag,
                             state,
                             nodes,
                             mechanism,
                             purview,
                             direction,
                         )
+
+
+def assert_binary_parity(seed, n, noisy, tol=1e-9):
+    """Parity on a seeded random binary network (cm derived from the TPM)."""
+    rng = np.random.default_rng(seed)
+    sbn = random_sbn(rng, n, noisy)
+    cm = cm_from_sbn(sbn)
+    labels = tuple("ABCD"[:n])
+    stock_network = Network(sbn, cm=cm, node_labels=labels)
+    network, _sbs = mv_network_from_sbn(sbn, cm, labels)
+    assert_binary_parity_networks(stock_network, network, n, ("seed", seed), tol)
 
 
 class TestRandomBinaryParity:
@@ -359,6 +402,134 @@ class TestRandomBinaryParity:
     @pytest.mark.parametrize("seed,noisy", [(7, False), (8, True)])
     def test_four_nodes(self, seed, noisy):
         assert_binary_parity(seed, 4, noisy)
+
+
+EPS = 1e-6
+
+# Near-deterministic 3-node networks from the PR #2 review. R1: two
+# single-node complexes whose Φ differ by one ulp; stock's ``max`` over
+# ``PyPhiFloat`` keeps the first one visited. R2: the cause state is a
+# mathematical tie. R3 (deterministic): the cause states (1, 0) and (0, 1)
+# tie mathematically but stock's rounding separates them by one ulp.
+REVIEW_SBN_R1 = [
+    [EPS, 1 - EPS, EPS],
+    [1 - EPS, 1.0, 0.0],
+    [EPS, 1.0, 1.0],
+    [0.0, EPS, 1 - EPS],
+    [1.0, 1 - EPS, 1.0],
+    [0.0, EPS, 1 - EPS],
+    [EPS, 1.0, EPS],
+    [EPS, 1 - EPS, 1.0],
+]
+REVIEW_SBN_R2 = [
+    [0.0, 1.0, 1 - EPS],
+    [1 - EPS, 1 - EPS, EPS],
+    [1 - EPS, 1 - EPS, EPS],
+    [EPS, EPS, EPS],
+    [1 - EPS, 1.0, EPS],
+    [1 - EPS, 1 - EPS, 1 - EPS],
+    [EPS, EPS, EPS],
+    [1 - EPS, 1 - EPS, 1 - EPS],
+]
+REVIEW_SBN_R3 = [
+    [0, 1, 1],
+    [1, 1, 0],
+    [1, 1, 0],
+    [0, 0, 0],
+    [1, 1, 0],
+    [1, 1, 1],
+    [0, 0, 0],
+    [1, 1, 1],
+]
+
+
+def review_pair(sbn):
+    sbn = np.asarray(sbn, dtype=float)
+    cm = np.ones((3, 3), dtype=int)
+    stock_network = Network(sbn, cm=cm)
+    network, _sbs = mv_network_from_sbn(sbn, cm, None)
+    return stock_network, network
+
+
+class TestTieRegressions:
+    """Cases where ties must resolve exactly as stock resolves them."""
+
+    def test_r1_complex_tie_within_precision(self):
+        stock_network, network = review_pair(REVIEW_SBN_R1)
+        state = (1, 0, 0)
+        phis = {}
+        for nodes in [(1,), (2,)]:
+            stock_phi = float(new_big_phi.sia(Subsystem(stock_network, state, nodes)).phi)
+            our_phi = float(sia(MultivaluedSubsystem(network, state, nodes)).phi)
+            assert our_phi == stock_phi
+            phis[nodes] = stock_phi
+        # One ulp apart: a strict ``>`` would pick (1,), stock keeps (2,).
+        assert phis[(1,)] != phis[(2,)]
+        assert abs(phis[(1,)] - phis[(2,)]) < 1e-13
+        stock_complex = new_big_phi.maximal_complex(stock_network, state)
+        our_complex = maximal_complex(network, state)
+        assert tuple(stock_complex.node_indices) == (2,)
+        assert tuple(our_complex.node_indices) == (2,)
+        assert float(our_complex.phi) == float(stock_complex.phi)
+
+    def test_r2_cause_state_tie(self):
+        stock_network, network = review_pair(REVIEW_SBN_R2)
+        state, nodes = (1, 0, 0), (0, 1)
+        stock_sia = new_big_phi.sia(Subsystem(stock_network, state, nodes))
+        our_sia = sia(MultivaluedSubsystem(network, state, nodes))
+        assert tuple(stock_sia.system_state[Direction.CAUSE].state) == (0, 1)
+        assert_same_sia(stock_sia, our_sia, "R2", tol=1e-9)
+
+    def test_r3_deterministic_tie_is_bit_identical(self):
+        stock_network, network = review_pair(REVIEW_SBN_R3)
+        state, nodes = (1, 1, 0), (1, 2)
+        stock_subsystem = Subsystem(stock_network, state, nodes)
+        subsystem = MultivaluedSubsystem(network, state, nodes)
+        expected = stock_subsystem.intrinsic_information(Direction.CAUSE, nodes, nodes)
+        actual = subsystem.intrinsic_information(Direction.CAUSE, nodes, nodes)
+        assert tuple(expected.state) == (0, 1)
+        assert tuple(actual.state) == tuple(expected.state)
+        assert [tuple(t.state) for t in actual.ties] == [
+            tuple(t.state) for t in expected.ties
+        ]
+        # Deterministic TPM: the whole computation is bit-identical.
+        for purview_state in all_states(2):
+            assert float(
+                subsystem.intrinsic_information(
+                    Direction.CAUSE, nodes, nodes, states=[purview_state]
+                ).intrinsic_information
+            ) == float(
+                stock_subsystem.intrinsic_information(
+                    Direction.CAUSE, nodes, nodes, states=[purview_state]
+                ).intrinsic_information
+            )
+        stock_sia = new_big_phi.sia(stock_subsystem)
+        our_sia = sia(subsystem)
+        assert_same_sia(stock_sia, our_sia, "R3", tol=0.0)
+
+    @pytest.mark.slow
+    def test_symmetric_copy_pairs_four_nodes(self):
+        # Two disjoint noisy copy pairs, p = 0.2 + 0.6 * partner: (0, 1) and
+        # (2, 3) tie exactly in every state; stock's visiting order reaches
+        # (2, 3) first.
+        rules = tuple(
+            (lambda partner: (lambda state: 0.2 + 0.6 * state[partner]))(partner)
+            for partner in (1, 0, 3, 2)
+        )
+        sbn = binary_sbn(rules)
+        cm = cm_from_sbn(sbn)
+        labels = ("A", "B", "C", "D")
+        stock_network = Network(sbn, cm=cm, node_labels=labels)
+        network, _sbs = mv_network_from_sbn(sbn, cm, labels)
+        for state in all_states(4):
+            stock_complex = new_big_phi.maximal_complex(stock_network, state)
+            our_complex = maximal_complex(network, state)
+            assert tuple(stock_complex.node_indices) == (2, 3), state
+            assert tuple(our_complex.node_indices) == (2, 3), state
+            assert float(our_complex.phi) == pytest.approx(
+                float(stock_complex.phi), abs=1e-9
+            )
+        assert_binary_parity_networks(stock_network, network, 4, "copy-pairs")
 
 
 class TestTernaryAndMixedRadix:
