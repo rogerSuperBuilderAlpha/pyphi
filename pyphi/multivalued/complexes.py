@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Major-complex search over MultivaluedNetwork (exact IIT-4.0 Φ)."""
 
 from __future__ import annotations

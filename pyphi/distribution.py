@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # distribution.py
 """Functions for manipulating probability distributions."""
 
@@ -138,7 +137,7 @@ def flatten(repertoire, big_endian=False):
     if repertoire is None:
         return None
 
-    order = 'C' if big_endian else 'F'
+    order = "C" if big_endian else "F"
     # For efficiency, use `ravel` (which returns a view of the array) instead
     # of `np.flatten` (which copies the whole array).
     return repertoire.squeeze().ravel(order=order)
@@ -162,7 +161,7 @@ def unflatten(repertoire, purview, N, big_endian=False):
     Returns:
         np.ndarray: The unflattened repertoire.
     """
-    order = 'C' if big_endian else 'F'
+    order = "C" if big_endian else "F"
     return repertoire.reshape(repertoire_shape(purview, N), order=order)
 
 

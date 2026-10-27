@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from math import log2
 
 import numpy as np
@@ -175,9 +174,9 @@ def test_to_2dimensional():
 def test_state_by_state2state_by_node():
     result = convert.state_by_state2state_by_node(state_by_state)
     expected = convert.to_multidimensional(state_by_node)
-    print('Result:')
+    print("Result:")
     print(result)
-    print('Expected:')
+    print("Expected:")
     print(expected)
     assert np.array_equal(result, expected)
 

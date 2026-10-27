@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # data_structures/pyphi_float.py
 
 from ..conf import config
@@ -34,8 +33,8 @@ class PyPhiFloat(float):
         return hash(round(self, config.PRECISION))
 
     def to_json(self):
-        return {'value': float(self)}
+        return {"value": float(self)}
 
     @classmethod
     def from_json(cls, data):
-        return cls(data['value'])
+        return cls(data["value"])

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Opt-in multivalued IIT 4.0: state space, binary parity, and Φ-structure."""
 
 import math
@@ -99,7 +98,7 @@ class TestStateSpacePreservation:
     def test_ternary_sbs_preserved_and_stock_collapses(self):
         sbs = deterministic_sbs((3, 3), lambda state: (state[1], state[0]))
         with pytest.raises(Exception):
-            Network(sbs, node_labels=('A', 'B'))
+            Network(sbs, node_labels=("A", "B"))
 
         collapsed = ExplicitTPM(sbs, validate=False)
         assert collapsed.is_state_by_state()
@@ -109,7 +108,7 @@ class TestStateSpacePreservation:
         assert collapsed.number_of_units != 2
 
         native = MultivaluedExplicitTPM(sbs, (3, 3))
-        network = MultivaluedNetwork(native, (3, 3), node_labels=('A', 'B'))
+        network = MultivaluedNetwork(native, (3, 3), node_labels=("A", "B"))
         assert native.num_states_per_node == (3, 3)
         assert native.num_states == 9
         assert native.shape == (9, 9)
@@ -119,7 +118,7 @@ class TestStateSpacePreservation:
         assert np.allclose(network.sbs(), sbs)
 
         triad = deterministic_sbs((3, 3, 3), ternary_triad_next)
-        triad_net = MultivaluedNetwork(triad, (3, 3, 3), node_labels=('W', 'S', 'C'))
+        triad_net = MultivaluedNetwork(triad, (3, 3, 3), node_labels=("W", "S", "C"))
         assert triad_net.tpm.shape == (27, 27)
         assert triad_net.num_states == 27
         assert np.allclose(triad_net.sbs(), triad)
@@ -129,7 +128,7 @@ class TestStateSpacePreservation:
         sbs = deterministic_sbs(radix, lambda state: (state[0], state[1], state[2]))
         assert sbs.shape == (24, 24)
         network = MultivaluedNetwork(
-            sbs, radix, cm=np.eye(3), node_labels=('A', 'B', 'C')
+            sbs, radix, cm=np.eye(3), node_labels=("A", "B", "C")
         )
         assert network.num_states_per_node == radix
         assert network.num_states == 24
@@ -161,7 +160,7 @@ class TestBinaryParity:
         rules = binary_triad_rules()
         sbn = binary_sbn(rules)
         state = (1, 1, 1)
-        labels = ('W', 'S', 'C')
+        labels = ("W", "S", "C")
         stock = stock_phi(sbn, TRIAD_CM, state, labels)
         network, _sbs = mv_network_from_sbn(sbn, TRIAD_CM, labels)
         ours = exact_phi(network, state)
@@ -176,7 +175,7 @@ class TestBinaryParity:
         )
         cm = np.zeros((3, 3))
         state = (1, 0, 0)
-        labels = ('A', 'B', 'C')
+        labels = ("A", "B", "C")
         stock = stock_phi(sbn, cm, state, labels)
         network, _sbs = mv_network_from_sbn(sbn, cm, labels)
         assert float(stock.phi) == pytest.approx(0.0, abs=PHI_TOL)
@@ -185,14 +184,14 @@ class TestBinaryParity:
         # Two independent copy nodes, binary and then the same rule at k=2
         # inside the multivalued types.
         sbs = deterministic_sbs((2, 2), lambda state: state)
-        indep = MultivaluedNetwork(sbs, (2, 2), cm=np.eye(2), node_labels=('A', 'B'))
+        indep = MultivaluedNetwork(sbs, (2, 2), cm=np.eye(2), node_labels=("A", "B"))
         assert exact_phi(indep, (1, 0)) == pytest.approx(0.0, abs=PHI_TOL)
 
     def test_phi_structure_matches_stock(self):
         rules = binary_triad_rules()
         sbn = binary_sbn(rules)
         state = (1, 1, 1)
-        labels = ('W', 'S', 'C')
+        labels = ("W", "S", "C")
         stock_network = Network(sbn, cm=TRIAD_CM, node_labels=labels)
         stock_structure = new_big_phi.phi_structure(Subsystem(stock_network, state))
         network, _sbs = mv_network_from_sbn(sbn, TRIAD_CM, labels)
@@ -231,7 +230,7 @@ class TestTernaryAndMixedRadix:
         sbs = deterministic_sbs((3, 3, 3), ternary_triad_next)
         assert sbs.shape == (27, 27)
         network = MultivaluedNetwork(
-            sbs, (3, 3, 3), cm=TRIAD_CM, node_labels=('W', 'S', 'C')
+            sbs, (3, 3, 3), cm=TRIAD_CM, node_labels=("W", "S", "C")
         )
         state = (1, 1, 1)
         phi = exact_phi(network, state)
@@ -256,12 +255,12 @@ class TestTernaryAndMixedRadix:
     def test_ternary_factored_system_has_zero_phi(self):
         sbs = deterministic_sbs((3, 3, 3), lambda state: state)
         network = MultivaluedNetwork(
-            sbs, (3, 3, 3), cm=np.eye(3), node_labels=('A', 'B', 'C')
+            sbs, (3, 3, 3), cm=np.eye(3), node_labels=("A", "B", "C")
         )
         assert exact_phi(network, (1, 2, 0)) == pytest.approx(0.0, abs=PHI_TOL)
 
         disconnected = MultivaluedNetwork(
-            sbs, (3, 3, 3), cm=np.zeros((3, 3)), node_labels=('A', 'B', 'C')
+            sbs, (3, 3, 3), cm=np.zeros((3, 3)), node_labels=("A", "B", "C")
         )
         assert exact_phi(disconnected, (0, 0, 0)) == pytest.approx(0.0, abs=PHI_TOL)
         assert float(maximal_complex(disconnected, (0, 0, 0)).phi) == pytest.approx(
@@ -273,7 +272,7 @@ class TestTernaryAndMixedRadix:
         sbs = deterministic_sbs(radix, mixed_radix_next)
         assert sbs.shape == (12, 12)
         network = MultivaluedNetwork(
-            sbs, radix, cm=TRIAD_CM, node_labels=('A', 'B', 'C')
+            sbs, radix, cm=TRIAD_CM, node_labels=("A", "B", "C")
         )
         # (1, 1, 1): B' = 1+1 = 2, A' = C' = 1, so the state is reachable
         # from itself only if B' == 1. Use the image (1, 2, 1), which

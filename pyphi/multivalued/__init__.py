@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Opt-in multivalued (mixed-radix) IIT 4.0.
 
 Stock ``ExplicitTPM`` / ``Subsystem`` index states as binary: a square
@@ -30,14 +29,14 @@ from .subsystem_mv import MultivaluedSubsystem
 from .tpm import MultivaluedExplicitTPM, MultivaluedTPMError, SBSNativeExplicitTPM
 
 __all__ = [
-    'MultivaluedNetwork',
-    'MultivaluedExplicitTPM',
-    'SBSNativeExplicitTPM',
-    'MultivaluedTPMError',
-    'MultivaluedSubsystem',
-    'exact_phi',
-    'sia',
-    'phi_structure',
-    'maximal_complex',
-    'probe_exact_phi_blocker',
+    "MultivaluedNetwork",
+    "MultivaluedExplicitTPM",
+    "SBSNativeExplicitTPM",
+    "MultivaluedTPMError",
+    "MultivaluedSubsystem",
+    "exact_phi",
+    "sia",
+    "phi_structure",
+    "maximal_complex",
+    "probe_exact_phi_blocker",
 ]
