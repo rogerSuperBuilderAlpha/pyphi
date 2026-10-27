@@ -144,6 +144,20 @@ class MultivaluedExplicitTPM:
     def __array__(self, dtype=None):
         return np.asarray(self._tpm, dtype=dtype)
 
+    def array_equal(self, other: object) -> bool:
+        """Same alphabet and the same SBS matrix (``ExplicitTPM.array_equal``)."""
+        return (
+            isinstance(other, MultivaluedExplicitTPM)
+            and self._num_states_per_node == other._num_states_per_node
+            and np.array_equal(self._tpm, other._tpm)
+        )
+
+    def __eq__(self, other: object) -> bool:
+        return self.array_equal(other)
+
+    def __hash__(self) -> int:
+        return hash((self._num_states_per_node, self._hash))
+
     def __repr__(self) -> str:
         return (
             f"MultivaluedExplicitTPM(shape={self.shape}, "

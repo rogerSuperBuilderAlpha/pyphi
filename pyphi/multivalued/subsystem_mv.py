@@ -12,15 +12,17 @@ from pyphi import validate
 from pyphi.conf import config, fallback
 from pyphi.connectivity import get_inputs_from_cm
 from pyphi.direction import Direction
+from pyphi.exceptions import StateUnreachableError
 from pyphi.models.cuts import NullCut
 from pyphi.models.mechanism import RepertoireIrreducibilityAnalysis, StateSpecification
 
-from .conditional_independence import encode_state
 from .distinctions import DistinctionMethods
 from .network import MultivaluedNetwork
 from .tpm import MultivaluedTPMError
 from .utils_mv import (
     all_states_mixed,
+    backward_node_tpms,
+    condition_node_tpm,
     cut_node_tpm,
     factorize_node_tpms,
     max_entropy_mv,
@@ -77,24 +79,53 @@ class MultivaluedSubsystem(DistinctionMethods):
             i: self.state[i] for i in self.external_indices
         }
 
-        sbs = network.sbs()
-        raw_node_tpms = factorize_node_tpms(sbs, self.num_states_per_node)
+        # Same construction as stock ``Subsystem``: the effect (forward) TPM
+        # is the network TPM conditioned on the background state; the cause
+        # (backward) TPM weights each background state by how likely it was to
+        # have produced the current state (``pyphi.tpm.backward_tpm``). Both
+        # are built from the uncut network TPM; the cut only decides which
+        # parents each node then marginalizes out (as ``pyphi.node.Node``).
+        raw_node_tpms = factorize_node_tpms(network.sbs(), self.num_states_per_node)
+        conditioned = [
+            condition_node_tpm(tpm, self._background) for tpm in raw_node_tpms
+        ]
+
+        if config.VALIDATE_SUBSYSTEM_STATES:
+            self._validate_state_reachable(conditioned)
+
+        backward = backward_node_tpms(raw_node_tpms, self.state, self.node_indices)
+
         self._effect_by_node = {}
+        self._cause_by_node = {}
         for i in self.node_indices:
             inputs = set(get_inputs_from_cm(i, self.cm))
             self._effect_by_node[i] = cut_node_tpm(
-                raw_node_tpms[i], i, inputs, self.num_states_per_node
+                conditioned[i], i, inputs, self.num_states_per_node
+            )
+            self._cause_by_node[i] = cut_node_tpm(
+                backward[i], i, inputs, self.num_states_per_node
             )
 
-        # Reachability: some previous state must map to current with p>0.
-        curr_idx = encode_state(self.state, self.num_states_per_node)
-        col = sbs[:, curr_idx].astype(float)
-        if col.sum() <= 0.0:
-            from pyphi.exceptions import StateUnreachableError
-
-            raise StateUnreachableError(self.state)
-
         self.nodes = tuple(self.node_indices)
+
+    def _validate_state_reachable(self, conditioned_node_tpms) -> None:
+        """Mirror ``validate.state_reachable``.
+
+        With the background fixed to its current state, some previous state of
+        the subsystem nodes must give every subsystem node its current state
+        with nonzero probability.
+        """
+        pr = np.ones(
+            [
+                k if i in self.node_indices else 1
+                for i, k in enumerate(self.num_states_per_node)
+            ],
+            dtype=float,
+        )
+        for i in self.node_indices:
+            pr = pr * conditioned_node_tpms[i][..., self.state[i]]
+        if not np.any(pr > 0.0):
+            raise StateUnreachableError(self.state)
 
     def _merge_background(self, condition: dict[int, int]) -> dict[int, int]:
         merged = dict(self._background)
@@ -123,9 +154,19 @@ class MultivaluedSubsystem(DistinctionMethods):
     # --- repertoires ---
 
     def _effect_single_node(
-        self, condition: dict[int, int], purview_node: int
+        self,
+        condition: dict[int, int],
+        purview_node: int,
+        direction: Direction = Direction.EFFECT,
     ) -> np.ndarray:
-        tpm = self._effect_by_node[purview_node]
+        # Stock ``_single_node_effect_repertoire`` reads the node's backward
+        # TPM when asked for the CAUSE direction (forward cause repertoire).
+        if direction == Direction.CAUSE:
+            tpm = self._cause_by_node[purview_node]
+        elif direction == Direction.EFFECT:
+            tpm = self._effect_by_node[purview_node]
+        else:
+            return validate.direction(direction)
         ks = self.num_states_per_node
         k_p = ks[purview_node]
         condition = self._merge_background(condition)
@@ -172,16 +213,18 @@ class MultivaluedSubsystem(DistinctionMethods):
             dtype=float,
         )
         for p in purview:
-            joint = joint * self._effect_single_node(condition, p)
+            joint = joint * self._effect_single_node(condition, p, direction)
         return joint
 
     def cause_repertoire(self, mechanism, purview, **kwargs):
         """Cause repertoire as the normalized product of single-node causes.
 
-        Matches stock IIT 4.0 on a full system: each mechanism node contributes
-        ``P(X_m = s_m | previous)``, inputs outside the purview are averaged
-        out, and the product is normalized. Per-node alphabets may differ.
-        Non-input axes are already uniform in ``_effect_by_node``, so averaging
+        Matches stock ``Subsystem._cause_repertoire``: each mechanism node
+        contributes ``P(X_m' = s_m | previous)`` read from its backward TPM
+        (background weighted by its likelihood of producing the current
+        state), inputs outside the purview are averaged out, and the product
+        is normalized. Per-node alphabets may differ. Non-input and background
+        axes are already constant in ``_cause_by_node``, so averaging over
         them does not change the conditional.
         """
         if not purview:
@@ -196,7 +239,7 @@ class MultivaluedSubsystem(DistinctionMethods):
         non_purview = tuple(j for j in range(n) if j not in purview_set)
         for m in mechanism:
             # P(X_m' = current state | previous). Shape ``ks``.
-            p = np.asarray(self._effect_by_node[m][..., self.state[m]], dtype=float)
+            p = np.asarray(self._cause_by_node[m][..., self.state[m]], dtype=float)
             if non_purview:
                 p = p.mean(axis=non_purview, keepdims=True)
             joint = joint * p
@@ -280,10 +323,13 @@ class MultivaluedSubsystem(DistinctionMethods):
     def forward_cause_probability(
         self, mechanism, purview, purview_state, **kwargs
     ):
+        # Roles switched, read from the backward TPM (stock
+        # ``repertoire.forward_cause_probability``).
         er = self.effect_repertoire(
             mechanism=purview,
             purview=mechanism,
             mechanism_state=purview_state,
+            direction=Direction.CAUSE,
         )
         mechanism_state = state_of(mechanism, self.state)
         return float(er.squeeze()[mechanism_state]) if mechanism else 1.0
